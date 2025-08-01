@@ -1,0 +1,9 @@
+#Foundation==0.1.0a0.dev1
+pyobjc==11.0
+PySide6==6.9.0
+pandas==2.2.3
+numpy==2.2.5
+icnsutil==1.1.0
+send2trash==1.8.3
+sortedcontainers==2.4.0
+pillow==11.2.1
