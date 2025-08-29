@@ -1,3 +1,7 @@
+File manager for macos which is cleaner and more customizable.
+Similar in nature to Windows 10 file explorer.
+
+
 To install, this is what worked for me:
 1. pip install --upgrade pip
 2. pip install Foundation==0.1.0a0.dev1
