@@ -11,20 +11,6 @@ To install, this is what worked for me:
 
 
 
-To compile using Nuitka:
-1. Must install CPython (which may not be the default macos python version). For that, visit the official Python website: https://www.python.org/downloads/macos/. 
-2. Download the latest stable version of Python for macOS. 
-3. Open the file you downloaded (in the case of a tar.xz file, you can use the following command to extract it: **tar -xvf Python-<version>.tar.xz**)
-4. Navigate to the extracted directory and run the configure script to prepare the build environment: **./configure --enable-optimizations**
-5. Compile the source code using make: **make -j$(nproc)**
-6. Install Python: **sudo make altinstall**
-7. Verify the installation: **python3.x --version**
-8. Install Nuitka: **python3.x -m pip install nuitka**
-9. Install all packages in the requirements.txt file. Don't keep an venv folder in the project directory so Nuitka won't compile it as well.
-10. To compile the project:
-**python3.9 -m nuitka --standalone --macos-create-app-bundle --follow-imports --enable-plugin=pyside6  --include-data-files="results/icons/*=resources/icons_base/" --include-data-files="resources/SegoeUI.TTF=resources/"  --macos-app-icon='resources/black_binder.icns' CleanFinder.py**
-
-
 
 To wrap the project using py2app (assuming it's already installed, using pip install):
 
