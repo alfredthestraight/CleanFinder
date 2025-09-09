@@ -1,8 +1,9 @@
-File manager for macos which is cleaner and more customizable.
-Similar in nature to Windows 10 file explorer.
+A file manager for macos which is cleaner and more customizable.
+Similar to the file explorer used in Windows 10.
+Currently supports Sonoma, and (though a bit buggy) Sequoia
 
 
-To install, this is what worked for me:
+# **Installation:**
 1. pip install --upgrade pip
 2. pip install Foundation==0.1.0a0.dev1
 3. Rename the two "foundation" folders ('.../site-packages/foundation' and '.../site-packages/foundation-0.1.0a0.dev1.dist-info') to "Foundation", i.e., F instead of f
@@ -12,11 +13,11 @@ To install, this is what worked for me:
 
 
 
-To wrap the project using py2app (assuming it's already installed, using pip install):
+# To wrap the project using py2app (assuming it's already installed):
 
 **python py2app_setup.py py2app**
 
-Issues that may arise when trying to use py2app in order to compile the project
+### Issues that may arise when trying to use py2app in order to compile the project:
 * You may need to change folder "~.venv/lib/python3.9/site-packages/Foundation" from "Foundation" to "foundation" or vice versa 
 * For py2app_setup to work you may need to revert setup tools to version 70.3.0
 * Sometimes pip3 install / pip3 install -U worked and pip didn't (e.g., **pip3 install -U pyobjc**)
