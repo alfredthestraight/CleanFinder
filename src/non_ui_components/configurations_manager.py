@@ -409,6 +409,10 @@ class ConfigurationsManager:
                     "Alt+Y",
                     "Ctrl+Y"
                 ],
+                "OPEN_FILE_IN_TERMINAL": [
+                    "Alt+T",
+                    "Ctrl+T"
+                ],
                 "SELECT_ALL_UNTIL_END": [
                       "Shift+End"
                 ],

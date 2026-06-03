@@ -19,7 +19,7 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 rename_file_or_dir, run_file_in_terminal, beautify_bytes_size,
                                 is_dir, is_path_an_app, get_all_items_in_path, parent_directory,
                                 extract_extension_from_path, extract_filename_from_path, is_root,
-                                save_app_icon_in_app_icons_dir, dir_)
+                                save_app_icon_in_app_icons_dir, open_path_in_terminal, dir_)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
     map_key_to_new_row_num, create_qaction_key_sequence
 from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceTextInSelectedItems,\
@@ -441,7 +441,9 @@ class FileExplorerTable(QTableView):
     def open_item_from_context_menu(self):
         self.on_doubleClicked(self.currently_selected_filename_indices[0])
 
-
+    def open_path_in_terminal(self):
+        open_path_in_terminal(self.path)
+    
     """
     Items name manipulation
     """

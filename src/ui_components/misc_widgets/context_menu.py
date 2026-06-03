@@ -67,6 +67,8 @@ class ContextMenuDelegate:
                      lambda: self.file_exp_obj.zip_items(
                          self.file_exp_obj.currently_selected_filename_indices
                      )},
+                {"menu_item_name": "Open path in terminal",
+                 "associated_method": self.file_exp_obj.open_path_in_terminal},
                 ]
 
     @property
