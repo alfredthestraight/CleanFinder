@@ -134,7 +134,8 @@ def map_key_to_new_row_num(key_id: int, caller_widget) -> int:
         if is_currently_selected:
             return current_row - 1
         else:
-            return None
+            last_row = caller_widget.model()._data.shape[0]-1
+            return last_row
     elif key_id == QtCore.Qt.Key.Key_Down:    # Down arrow
         if is_currently_selected:
             return current_row + 1

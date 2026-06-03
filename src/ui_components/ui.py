@@ -261,7 +261,9 @@ class ui(QtWidgets.QMainWindow):
 
         shortcut = QShortcut(QKeySequence("Tab"), self)
         shortcut.activated.connect(self.switch_table_focus)
-
+        shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
+        shortcut2.activated.connect(self.expose_input_textbox)
+        
 
         self.textbox_navigator.update_path(self.path)
 
