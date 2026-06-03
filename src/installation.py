@@ -147,7 +147,7 @@ class ExtensionsToIconsMappingCreator:
                 logger.info("get_example_files_with_unique_extensions - exception caught. Continuing...")
                 continue
             if len(files_in_folder) == 0:
-                return
+                continue
 
             for f in files_in_folder:
                 files.append(os.path.join(folder, f))
