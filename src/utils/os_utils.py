@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 import os
 import shutil
+import shlex
 import icnsutil
 import datetime
 import plistlib
@@ -390,7 +391,7 @@ def turn_extensions_and_icons_from_CFBundleTypeExtensions_to_df(extensions_and_i
                     if len(x[0]) >= 2:
                         extensions_and_icons_flattened = \
                             extensions_and_icons_flattened + [(y, x[1]) for y in x[0]]
-                    else:
+                    elif len(x[0]) == 1:
                         extensions_and_icons_flattened.append((x[0][0], x[1]))
             elif isinstance(x, list):
                 extensions_and_icons_flattened = (extensions_and_icons_flattened +
@@ -730,6 +731,37 @@ def run_file_in_terminal(item_path: str, app_name: str = None):
         return success
     except:
         return -1
+
+
+def open_path_in_terminal(item_path: str):
+    """
+    Opens the macOS Terminal at the specified path.
+    If the path is a file, it opens the terminal in the file's parent directory.
+    """
+    # 1. Expand paths like '~' and get the absolute path
+    abs_path = os.path.abspath(os.path.expanduser(item_path))
+
+    # 2. If it's a file, get its containing directory
+    if os.path.isfile(abs_path):
+        target_dir = os.path.dirname(abs_path)
+    elif os.path.isdir(abs_path):
+        target_dir = abs_path
+    else:
+        raise FileNotFoundError(f"The path '{item_path}' does not exist.")
+
+    # 3. Construct AppleScript to open Terminal and change directory
+    # shlex.quote ensures spaces and special characters in the path are safely escaped
+    escaped_path = shlex.quote(target_dir)
+
+    applescript = f'''
+    tell application "Terminal"
+        do script "cd {escaped_path}"
+        activate
+    end tell
+    '''
+
+    # 4. Execute the AppleScript
+    subprocess.run(["osascript", "-e", applescript], check=True)
 
 
 def open_application(app_path: str) -> int:

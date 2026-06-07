@@ -2,7 +2,7 @@ import os.path
 from typing import Union
 from PySide6 import QtWidgets, QtGui, QtCore
 from PySide6.QtCore import Qt, QSize, QEvent
-from PySide6.QtGui import QFont, QIcon, QPixmap, QActionת QShortcut, QKeySequence
+from PySide6.QtGui import QFont, QIcon, QPixmap, QAction, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QAbstractItemView, QVBoxLayout, QLabel, QLineEdit, QStackedWidget,
                                QSizePolicy, QHBoxLayout, QSplitter, QMenu, QWidget, QPushButton)
 
