@@ -32,7 +32,10 @@ def map_shortcut_name_to_func(file_explorer_obj, action_name: str):
         "REDO_LAST_UNDONE_ACTION": file_explorer_obj.redo_last_undone_action,
         "OPEN_FILE_IN_TERMINAL": file_explorer_obj.open_path_in_terminal,
         "SELECT_ALL_UNTIL_END": file_explorer_obj.select_all_items_from_curr_to_end,
-        "SELECT_ALL_UNTIL_START": file_explorer_obj.select_all_items_from_curr_to_head}[action_name]
+        "SELECT_ALL_UNTIL_START": file_explorer_obj.select_all_items_from_curr_to_head,
+        "JUMP_TO_PATH_TEXTBOX": file_explorer_obj.encompassing_ui.expose_input_textbox,
+        "OPEN_CONTEXT_MENU": file_explorer_obj.trigger_context_menu
+    }[action_name]
 
 
 class change_items_names_case:

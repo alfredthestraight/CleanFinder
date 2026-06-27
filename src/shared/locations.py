@@ -9,11 +9,26 @@ else:
 
 
 APP_PATH = os.getcwd()
-ICONS_DIR = os.path.join(APP_PATH, 'results', 'icons')
-BASE_ICONS_DIR = os.path.join(APP_PATH, 'resources', 'icons_base')
-CONFIG_FILE_PATH = os.path.join(APP_PATH, 'resources', 'config.json')
+
+if os.path.exists(os.path.join(APP_PATH, 'resources')):
+    RESOURCES_PATH = os.path.join(APP_PATH, 'resources')
+elif os.path.exists(os.path.join(APP_PATH, 'Resources', 'resources')):
+    RESOURCES_PATH = os.path.join(APP_PATH, 'Resources', 'resources')
+elif os.path.exists(os.path.join(APP_PATH, 'Frameworks', 'resources')):
+    RESOURCES_PATH = os.path.join(APP_PATH, 'Frameworks', 'resources')
+
+
+if os.path.exists(os.path.join(APP_PATH, 'results')):
+    RESULTS_PATH = os.path.join(APP_PATH, 'results')
+elif os.path.exists(os.path.join(APP_PATH, 'Resources', 'results')):
+    RESULTS_PATH = os.path.join(APP_PATH, 'Resources', 'results')
+elif os.path.exists(os.path.join(APP_PATH, 'Frameworks', 'results')):
+    RESULTS_PATH = os.path.join(APP_PATH, 'Frameworks', 'results')
+
+ICONS_DIR = os.path.join(RESULTS_PATH, 'icons')
+BASE_ICONS_DIR = os.path.join(RESOURCES_PATH, 'icons_base')
+CONFIG_FILE_PATH = os.path.join(RESOURCES_PATH, 'config.json')
 DRAGGING_ICON = os.path.join(ICONS_DIR, '_dragged_items_.png')
-RESULTS_PATH = os.path.join(APP_PATH, 'results')
 EXT_AND_ICONS_DF_PATH = os.path.join(RESULTS_PATH, 'usable_extensions_and_icons_df')
 LOG_FILE_PATH = os.path.join(RESULTS_PATH, 'log.log')
 APPLICATION_DIRECTORIES = ['/Applications',

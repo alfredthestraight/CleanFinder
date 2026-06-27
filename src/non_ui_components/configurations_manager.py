@@ -418,6 +418,12 @@ class ConfigurationsManager:
                 ],
                 "SELECT_ALL_UNTIL_START": [
                       "Shift+Home"
+                ],
+                "JUMP_TO_PATH_TEXTBOX": [
+                      "Ctrl+Alt+Home"
+                ],
+                "OPEN_CONTEXT_MENU": [
+                      "Meta+Space"
                 ]
             },
             "sorting": {

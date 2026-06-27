@@ -1,10 +1,12 @@
 import os.path
 import time
+from time import sleep
+
 import numpy as np
 import datetime
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtGui import QFont, QColor, QPixmap, QKeySequence, QDrag, QShortcut
-from PySide6.QtCore import Qt, QSize, QItemSelectionModel, QMimeData, QUrl, QRect, QItemSelection
+from PySide6.QtCore import Qt, QSize, QItemSelectionModel, QMimeData, QUrl, QRect, QItemSelection, QEvent
 from PySide6.QtWidgets import (QApplication, QTableView, QAbstractItemView, QMessageBox,
                                QScrollBar, QHeaderView)
 from src.ui_components.misc_widgets.properties_window import (PropertiesWindowSingleItem,
@@ -19,7 +21,9 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 rename_file_or_dir, run_file_in_terminal, beautify_bytes_size,
                                 is_dir, is_path_an_app, get_all_items_in_path, parent_directory,
                                 extract_extension_from_path, extract_filename_from_path, is_root,
-                                save_app_icon_in_app_icons_dir, open_path_in_terminal, dir_)
+                                save_app_icon_in_app_icons_dir, open_path_in_terminal, dir_,
+                                create_file, increment_max_item_name, get_all_item_names_in_directory,
+                                get_type_as_icon_string, get_file_type, size_bytes_to_string)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
     map_key_to_new_row_num, create_qaction_key_sequence
 from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceTextInSelectedItems,\
@@ -34,6 +38,7 @@ class FileExplorerTable(QTableView):
                  root_dir_path: str,
                  xdim: int = None, ydim: int = None,
                  parent=None, encompassing_ui=None):
+        self._context_menu_reopen_pos = None
         super().__init__(parent=parent)
 
         self.structure_changed = False
@@ -104,20 +109,22 @@ class FileExplorerTable(QTableView):
          context menu:
         """
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.contextMenuEvent)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+        # Persistent delegate: builds/configures the menu objects once (the costly part)
+        # and only re-adds actions on each right-click. See ContextMenuDelegate.
+        self.context_menu_delegate = ContextMenuDelegate(self)
         self.properties_dialog_boxes = []
 
 
         """
          Functionality & usability
         """
-        self.viewport().installEventFilter(self)
         selection_model = self.selectionModel()
         selection_model.selectionChanged.connect(self.on_selectionChanged)
         self.clicked.connect(self.on_clicked)
         self.doubleClicked.connect(self.on_doubleClicked)
-        shortcut = QShortcut(QKeySequence("Meta+Space"), self)
-        shortcut.activated.connect(self.trigger_context_menu)
+        # shortcut = QShortcut(QKeySequence("Meta+Space"), self)
+        # shortcut.activated.connect(self.trigger_context_menu)
 
 
         try:
@@ -411,31 +418,69 @@ class FileExplorerTable(QTableView):
             self.mousePressEvent(self.mouse_press_event_tmp)
 
 
+    def eventFilter(self, obj, event):
+        if (self._context_menu_reopen_pos is None
+                and event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.RightButton):
+            global_pos = event.globalPosition().toPoint()
+            viewport_pos = self.viewport().mapFromGlobal(global_pos)
+            if self.viewport().rect().contains(viewport_pos):
+                self._context_menu_reopen_pos = viewport_pos
+        return super().eventFilter(obj, event)
+
     """
     Context menu
     """
 
-    def contextMenuEvent(self, event):
+    def show_context_menu(self, pos):
+        """
+        `pos` is a QPoint in viewport coordinates (from customContextMenuRequested,
+        the keyboard shortcut, or the reopen recursion). This is a plain slot, not an
+        override of QWidget.contextMenuEvent, so Qt never invokes it with a native
+        QContextMenuEvent.
+        """
 
         if not os.path.exists(self.path):
             prompt_message("Path no longer exists",
                            "The current path you are in (" + self.path + ") no longer exist")
             return
 
-        index_clicked = self.index_at_row_and_col(self.indexAt(event).row(), 0)
+        index_clicked = self.index_at_row_and_col(self.indexAt(pos).row(), 0)
         clicked_item_name = index_clicked.data()
         clicked_on_empty_space = clicked_item_name is None
 
+        if not clicked_on_empty_space:
+            selected_rows = {x.row() for x in self.selectedIndexes()}
+            if index_clicked.row() not in selected_rows:
+                self.selectRow(index_clicked.row())
+            self.keep_selection_as_prev(self.selectedIndexes())
+
         items_paths = self.selected_items_paths
 
-        contextMenu = ContextMenuDelegate(self).populate_context_menu(
+        contextMenu = self.context_menu_delegate.populate_context_menu(
             clicked_on_empty_space, clicked_item_name, items_paths
         )
 
-        # Show context menu at the position of the mouse event
-        event.setX(event.x() + 20)
-        event.setY(event.y() + 10)
-        contextMenu.exec(self.mapToGlobal(event))
+        # Discard the right-click that opened this menu so it isn't mistaken for a
+        # reopen request. Only right-clicks captured *while* the menu is open (during
+        # exec) should trigger a reopen at the new position.
+        self._context_menu_reopen_pos = None
+
+        # Filter at the application level for the lifetime of exec(): QMenu.exec()
+        # grabs mouse input, so a viewport-level filter never sees the right-click
+        # that dismisses the menu until after it has already closed. An app-level
+        # filter sees that press while the menu is still open, letting us reopen at
+        # the new position.
+        app = QApplication.instance()
+        app.installEventFilter(self)
+        contextMenu.exec(self.viewport().mapToGlobal(pos))
+        app.removeEventFilter(self)
+
+        reopen_pos = self._context_menu_reopen_pos
+        self._context_menu_reopen_pos = None
+
+        if reopen_pos is not None:
+            self.show_context_menu(reopen_pos)
 
 
     def open_item_from_context_menu(self):
@@ -649,6 +694,33 @@ class FileExplorerTable(QTableView):
             single_run_qtimer(100, self.invoke_filename_editor,
                               index=self.index_of_item_name(new_dir_name))
 
+    def create_new_file(self, filename_with_ext: str):
+        if not os.path.exists(self.path):
+            prompt_message("Path no longer exists",
+                           "The current path you are in (" + self.path + ") no longer exist")
+            return
+        new_file_path = increment_max_item_name(
+            get_all_item_names_in_directory(self.path), self.path, filename_with_ext)
+        new_file_name = os.path.basename(new_file_path)
+        logger.info("file_explorer_table.create_new_file: " + new_file_path)
+        success = create_file(new_file_path)
+        self.encompassing_uis_manager.keep_last_action(UserAction_CreateItem(new_file_path))
+        with self.watcher:  # Temporarily disable files watcher
+            self.pandasModel.insertRows({'Name': new_file_name,
+                                         'Date modified': get_item_date_modified(new_file_path),
+                                         'Size': size_bytes_to_string(0),
+                                         'Type': get_file_type(new_file_path),
+                                         'file_type': get_type_as_icon_string(new_file_path),
+                                         'size_raw': 0,
+                                         'extension_n_char':
+                                             len(extract_extension_from_path(new_file_path)),
+                                         'date_modified_raw': os.path.getctime(new_file_path),
+                                         'is_folder': False, 'is_hidden': False})
+        self.click_timer = \
+            single_run_qtimer(100, self.invoke_filename_editor,
+                              index=self.index_of_item_name(new_file_name))
+        return success
+
     def add_new_ui(self):
         logger.info("Adding new ui")
         self.encompassing_uis_manager.create_new_window(root_dir_path=conf.DEFAULT_PATH)
@@ -778,7 +850,7 @@ class FileExplorerTable(QTableView):
         if index.isValid():
             rect = self.visualRect(index)
             pos = rect.center()
-            self.contextMenuEvent(pos)
+            self.show_context_menu(pos)
 
 
     """
@@ -1023,6 +1095,9 @@ class FileExplorerTable(QTableView):
         self.setStyleSheet(conf.FILE_EXPLORER_STYLE)
         self.vertical_scrollbar.setStyleSheet(conf.VERTICAL_SCROLLBAR_STYLE)
         self.horizontal_scrollbar.setStyleSheet(conf.HORIZONTAL_SCROLLBAR_STYLE)
+        # The persistent context menus keep the stylesheet from construction time, so
+        # re-style them here when the config (e.g. theme colors) changes.
+        self.context_menu_delegate.reconfigure_styles()
         self.model().refresh_data()
 
     def set_scrollbars(self):

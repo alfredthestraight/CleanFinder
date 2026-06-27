@@ -261,8 +261,8 @@ class ui(QtWidgets.QMainWindow):
 
         shortcut = QShortcut(QKeySequence("Tab"), self)
         shortcut.activated.connect(self.switch_table_focus)
-        shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
-        shortcut2.activated.connect(self.expose_input_textbox)
+        # shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
+        # shortcut2.activated.connect(self.expose_input_textbox)
         
 
         self.textbox_navigator.update_path(self.path)
@@ -395,6 +395,7 @@ class ui(QtWidgets.QMainWindow):
         self.favs_table_view_layout.addWidget(self.favs_table_view)
 
         shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), self.favs_table_view)
+        shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
         shortcut.activated.connect(self.on_enter_pressed_on_favorites_table)
 
 
@@ -485,6 +486,7 @@ class ui(QtWidgets.QMainWindow):
             if (event.type() == QEvent.Type.KeyPress):
                 if (event.key() == Qt.Key.Key_Escape):
                     self.encompassing_ui.hide_input_textbox()
+                    self.encompassing_ui.file_explorer.setFocus()
                 elif (event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return):
                     if os.path.exists(self.encompassing_ui.textbox.text()):
                         try:

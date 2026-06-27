@@ -1,57 +1,73 @@
-from src.utils.utils import single_run_qtimer
 import os
 from PySide6.QtWidgets import QMenu
-from src.utils.os_utils import create_file, increment_max_item_name, get_all_item_names_in_directory
 from src.utils.utils import configure_context_menu, add_actions_to_context_menu
 from src.utils.file_explorer_utils import change_items_names_case, open_file_as_app
-from src.non_ui_components.user_actions import UserAction_CreateItem
 
 
 class NewFileCreationWrapper:
-    def __init__(self, uis_manager, path: str = None, filename: str = 'New_file', extension: str = ''):
-        self.uis_manager = uis_manager
-        self.full_file_path = increment_max_item_name(
-            get_all_item_names_in_directory(path), path, filename + '.' + extension)
+    def __init__(self, file_exp_obj, filename: str = 'New_file', extension: str = ''):
+        self.file_exp_obj = file_exp_obj
+        self._filename_with_ext = filename + '.' + extension
 
     def __call__(self) -> int:
-        success = create_file(self.full_file_path)
-        self.uis_manager.keep_last_action(UserAction_CreateItem(self.full_file_path))
-        single_run_qtimer(milliseconds=200, func=lambda: self.uis_manager.refresh_all_uis())
-        return success
+        return self.file_exp_obj.create_new_file(self._filename_with_ext)
 
 
 class ContextMenuDelegate:
-    
+
     def __init__(self, file_exp_obj):
         self.file_exp_obj = file_exp_obj
 
-    def create_sub_context_menu(self, submenu_title: str,
-                                submenu_functionalities: list[dict]):
-        sub_context_menu = QMenu(self.file_exp_obj)
-        configure_context_menu(sub_context_menu)
-        sub_context_menu.setFixedWidth(180)
-        sub_context_menu.setTitle(submenu_title)
-        add_actions_to_context_menu(sub_context_menu, self.file_exp_obj, submenu_functionalities)
-        return sub_context_menu
+        # Persistent, pre-configured menu containers. configure_context_menu is the
+        # expensive part (stylesheet parse + frameless/translucent window flags, which
+        # force native popup-window creation on macOS), so it runs once here instead of
+        # on every right-click. populate_context_menu only clears and re-adds the cheap
+        # actions, reusing these same menus (and their already-created native windows).
+        self.main_menu = QMenu(file_exp_obj)
+        configure_context_menu(self.main_menu)  # keeps setFixedWidth(150)
 
-    def create_new_file_submenu(self, new_file_types: list[str] = ["txt", "xlsx", "docx"]):
+        self.new_file_submenu = QMenu(file_exp_obj)
+        configure_context_menu(self.new_file_submenu)
+        self.new_file_submenu.setFixedWidth(180)
+        self.new_file_submenu.setTitle("  New file")
+
+        self.manipulate_name_submenu = QMenu(file_exp_obj)
+        configure_context_menu(self.manipulate_name_submenu)
+        self.manipulate_name_submenu.setFixedWidth(180)
+
+    def reconfigure_styles(self):
+        """Re-apply menu styling after a live theme/color change. The persistent menus
+        keep the stylesheet captured at construction time, so this must be called from
+        FileExplorerTable.refresh_all_configurations when the config changes."""
+        for menu in (self.main_menu, self.new_file_submenu, self.manipulate_name_submenu):
+            configure_context_menu(menu)
+        # configure_context_menu resets width to 150; restore the submenu widths.
+        self.new_file_submenu.setFixedWidth(180)
+        self.manipulate_name_submenu.setFixedWidth(180)
+
+    def _repopulate_new_file_submenu(self, new_file_types: list[str]):
+        # NewFileCreationWrapper captures the table's current path, so the actions are
+        # rebuilt on every open even though the submenu container is reused.
+        self.new_file_submenu.clear()
         new_files_list = []
         for file_type in new_file_types:
             new_files_list.append(
                 {"menu_item_name": file_type,
                  "associated_method": NewFileCreationWrapper(
-                     self.file_exp_obj.encompassing_uis_manager,
-                     path=self.file_exp_obj.path, extension=file_type)
+                     self.file_exp_obj, extension=file_type)
                  })
 
         new_files_list.append(
             {"menu_item_name": "Default (no extension)",
-             "associated_method": NewFileCreationWrapper(
-                     self.file_exp_obj.encompassing_uis_manager,
-                     path=self.file_exp_obj.path
-             )})
+             "associated_method": NewFileCreationWrapper(self.file_exp_obj)})
 
-        return self.create_sub_context_menu("  New file", new_files_list)
+        add_actions_to_context_menu(self.new_file_submenu, self.file_exp_obj, new_files_list)
+
+    def _repopulate_manipulate_name_submenu(self, submenu_title: str):
+        self.manipulate_name_submenu.clear()
+        self.manipulate_name_submenu.setTitle(submenu_title)
+        add_actions_to_context_menu(self.manipulate_name_submenu, self.file_exp_obj,
+                                    self.item_name_manipulations_list)
 
     @property
     def click_on_empty_space_actions_list(self):
@@ -104,12 +120,12 @@ class ContextMenuDelegate:
                               items_list: list[str],
                               new_file_types: list[str] = ["txt", "xlsx", "docx"]):
 
-        menu = QMenu(self.file_exp_obj)
-        configure_context_menu(menu)
-        
-        new_file_contextMenu = self.create_new_file_submenu(new_file_types)
-        menu.addMenu(new_file_contextMenu)
-    
+        menu = self.main_menu
+        menu.clear()
+
+        self._repopulate_new_file_submenu(new_file_types)
+        menu.addMenu(self.new_file_submenu)
+
         clicked_on_app = False
         if len(items_list) == 1:
             if items_list[0][-4:].lower() == '.app':
@@ -153,9 +169,8 @@ class ContextMenuDelegate:
 
             """ Functions bulk #4 - string manipulation """
             submenu_item_name = "  Manipulate name" + ("" if len(items_list) == 1 else "s")
-            menu.addMenu(
-                self.create_sub_context_menu(submenu_item_name, self.item_name_manipulations_list)
-            )
+            self._repopulate_manipulate_name_submenu(submenu_item_name)
+            menu.addMenu(self.manipulate_name_submenu)
 
 
             """ Functions bulk #5 - cut / copy / paste / zip / properties """
