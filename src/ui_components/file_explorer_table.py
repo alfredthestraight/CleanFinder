@@ -5,7 +5,7 @@ from time import sleep
 import numpy as np
 import datetime
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtGui import QFont, QColor, QPixmap, QKeySequence, QDrag, QShortcut
+from PySide6.QtGui import QFont, QColor, QPixmap, QKeySequence, QDrag, QShortcut, QMouseEvent
 from PySide6.QtCore import Qt, QSize, QItemSelectionModel, QMimeData, QUrl, QRect, QItemSelection, QEvent
 from PySide6.QtWidgets import (QApplication, QTableView, QAbstractItemView, QMessageBox,
                                QScrollBar, QHeaderView)
@@ -31,6 +31,21 @@ from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceT
      PrefixSuffixChangeInSelectedItems, validate_name_change_is_approved
 from src.ui_components.misc_widgets.context_menu import ContextMenuDelegate
 from src.shared.vars import threads_server
+
+
+# Maps the configurable MULTISELECT_MODIFIER string to a Qt modifier flag. On macOS Qt swaps
+# Ctrl/Meta by default, so the Command key arrives as ControlModifier and the physical Control
+# key as MetaModifier. Qt's ExtendedSelection toggles individual rows on ControlModifier, so
+# remapping in mousePressEvent translates the chosen physical key into ControlModifier.
+MULTISELECT_MODIFIER_MAP = {
+    "command": Qt.KeyboardModifier.ControlModifier,
+    "cmd": Qt.KeyboardModifier.ControlModifier,
+    "control": Qt.KeyboardModifier.MetaModifier,
+    "ctrl": Qt.KeyboardModifier.MetaModifier,
+    "option": Qt.KeyboardModifier.AltModifier,
+    "alt": Qt.KeyboardModifier.AltModifier,
+    "shift": Qt.KeyboardModifier.ShiftModifier,
+}
 
 
 class FileExplorerTable(QTableView):
@@ -295,8 +310,25 @@ class FileExplorerTable(QTableView):
     Mouse events 
     """
 
+    def _remap_multiselect_modifier(self, event):
+        """Rewrite the event's modifiers so the configured key (conf.MULTISELECT_MODIFIER) acts
+        as the click-to-multiselect toggle instead of Command. Returns the (possibly new) event."""
+        desired = MULTISELECT_MODIFIER_MAP.get(
+            str(conf.MULTISELECT_MODIFIER).lower(), Qt.KeyboardModifier.ControlModifier)
+        if desired == Qt.KeyboardModifier.ControlModifier:
+            return event  # Command (default Qt behavior) — nothing to remap
+        mods = event.modifiers()
+        # Drop Control (so plain Command no longer toggles) and the desired flag itself, then
+        # set Control only when the desired key is actually held. Shift (range-select) is left as-is.
+        new_mods = mods & ~Qt.KeyboardModifier.ControlModifier & ~desired
+        if mods & desired:
+            new_mods |= Qt.KeyboardModifier.ControlModifier
+        return QMouseEvent(event.type(), event.position(), event.scenePosition(),
+                           event.globalPosition(), event.button(), event.buttons(), new_mods)
+
     def mousePressEvent(self, event):
         self.mouse_press_event_tmp = event
+        event = self._remap_multiselect_modifier(event)
         self.last_row = self.num_items
         self.tmp_bool = True
         self.press_pos = event.position()

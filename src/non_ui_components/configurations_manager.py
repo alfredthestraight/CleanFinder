@@ -170,6 +170,8 @@ class ConfigurationsManager:
         self.FAVORITES_DOCUMENTS_ICON = self.config["icons"]['FAVORITES_DOCUMENTS_ICON']
         self.BASIC_FAVORITES_DICT = self.config["BASIC_FAVORITES_DICT"]
         self.NEW_FOLDER_NAME_TEMPLATE = self.config["NEW_FOLDER_NAME_TEMPLATE"]
+        # Modifier key for click-to-multiselect: command / control / option / shift
+        self.MULTISELECT_MODIFIER = self.config.get("MULTISELECT_MODIFIER", "option")
         self.PAGE_DOWN_UP_NUM_ROWS = self.config["PAGE_DOWN_UP_NUM_ROWS"]
         self.DEFAULT_TEXT_INDENT = self.config["DEFAULT_TEXT_INDENT"]
 
@@ -346,6 +348,7 @@ class ConfigurationsManager:
                 ]
             },
             "NEW_FOLDER_NAME_TEMPLATE": "New Folder",
+            "MULTISELECT_MODIFIER": "option",
             "PAGE_DOWN_UP_NUM_ROWS": 10,
             "DEFAULT_TEXT_INDENT": 1,
             "FAVORITES_TITLE": "Bookmarks",
@@ -548,6 +551,7 @@ class ConfigurationsManager:
             {"config_keys_path": ["DATE_FORMAT"], "display_text": "Date format"},
             {"config_keys_path": ["SHOW_HIDDEN_ITEMS"], "display_text": "Show hidden items"},
             {"config_keys_path": ["NEW_FOLDER_NAME_TEMPLATE"], "display_text": "New folder name template"},
+            {"config_keys_path": ["MULTISELECT_MODIFIER"], "display_text": "Multiselect modifier key (command / control / option / shift)"},
             {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
             {"config_keys_path": ["FOLDERS_ALWAYS_ABOVE_FILES"], "display_text": "Alywas show folders above files"},
             {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
