@@ -170,7 +170,7 @@ def configure_context_menu(menu):
     menu.setWindowFlags(Qt.WindowType.Popup |
                         Qt.WindowType.FramelessWindowHint |
                         Qt.WindowType.NoDropShadowWindowHint)
-    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    # menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
 
 def add_actions_to_context_menu(menu, widget, actions_list):
