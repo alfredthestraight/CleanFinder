@@ -6,6 +6,20 @@ from PySide6.QtWidgets import (QLabel, QGridLayout, QPushButton, QSizePolicy, QH
 from src.utils.utils import flatten_list_of_lists
 
 
+# Keys that, by themselves, are not a bindable shortcut and must never overwrite a captured
+# chord. Bare modifiers and dead keys are derived from the Qt enum so the set stays correct
+# across Qt versions. Dead keys matter on macOS: "dead key" Option combos (accents such as
+# Option+E/I/N/U/`) route through the input method, which emits a trailing key event (often
+# Key_unknown with no modifiers) that would otherwise blank the label.
+_BARE_MODIFIER_KEYS = frozenset(int(k) for k in (
+    Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Meta,
+    Qt.Key.Key_Alt, Qt.Key.Key_AltGr, Qt.Key.Key_CapsLock,
+))
+_DEAD_KEYS = frozenset(int(getattr(Qt.Key, name))
+                       for name in dir(Qt.Key) if name.startswith("Key_Dead"))
+_NON_SHORTCUT_KEYS = _BARE_MODIFIER_KEYS | _DEAD_KEYS | {0, int(Qt.Key.Key_unknown)}
+
+
 class LabelWithXButton(QDialog):
     break_thread_run = Signal(str, str)
 
@@ -99,6 +113,17 @@ class KeyboardShortcutSelectorUi(QDialog):
         self.buttons_layout.addWidget(self.ok_btn)
         self.buttons_layout.addWidget(self.cancel_btn)
 
+        # The buttons must not grab keyboard focus: a focused QPushButton activates on
+        # Space/Enter, so pressing Space while building a shortcut would "click" Cancel and
+        # close the dialog. With NoFocus, every key press reaches the dialog's keyPressEvent
+        # (which captures it as part of the shortcut); the buttons stay mouse-clickable.
+        for btn in (self.ok_btn, self.cancel_btn):
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+        # Keep keyboard focus on the dialog so it receives all key events.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         self.ok_btn.clicked.connect(self.on_ok_clicked)
         self.ok_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.on_cancel_clicked)
@@ -125,8 +150,18 @@ class KeyboardShortcutSelectorUi(QDialog):
 
     def keyPressEvent(self, event):
 
-        self._user_message.setText("")
-        self.ok_btn.setEnabled(False)
+        # Ignore events that don't form a complete, intentional chord, leaving any existing
+        # capture untouched. Without this, auto-repeat, bare modifier presses, and the macOS
+        # dead-key follow-up events overwrite/blank the label (e.g. Alt+N self-erasing).
+        key = event.key()
+        if event.isAutoRepeat() or key in _NON_SHORTCUT_KEYS:
+            return
+
+        # Get the key and create a string that represents the full key stroke
+        base_key_name = QKeySequence(key).toString()
+        if base_key_name == "":
+            # Real key with no printable representation — nothing to commit.
+            return
 
         # Capture modifier keys like Ctrl, Shift, Alt
         modifiers = []
@@ -139,16 +174,13 @@ class KeyboardShortcutSelectorUi(QDialog):
         if event.modifiers() & Qt.KeyboardModifier.MetaModifier:
             modifiers.append("Meta")
 
-        # Get the key and create a string that represents the full key stroke
-        key = event.key()
-        base_key_name = QKeySequence(key).toString() if key not in [16777248, 16777249,
-                                                                    16777250, 16777251] else ""
-
         if modifiers:
             key_name = "+".join(modifiers) + "+" + base_key_name
         else:
             key_name = base_key_name
 
+        self._user_message.setText("")
+        self.ok_btn.setEnabled(False)
         self._label.setText(key_name)
 
         if not self.text_already_in_use:
