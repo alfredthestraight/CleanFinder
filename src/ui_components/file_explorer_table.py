@@ -395,10 +395,12 @@ class FileExplorerTable(QTableView):
             self.refresh_display_for_items(index, index.siblingAtRow(index.row()+1))
 
     def dragEnterEvent(self, event):
-        if not self.started_dragging:
-            return
-        event.setDropAction(Qt.DropAction.MoveAction)
-        event.accept()
+        if self.started_dragging:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        elif event.mimeData().hasUrls():
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
 
     def startDrag(self, index):
         if not self.started_dragging:
@@ -411,6 +413,7 @@ class FileExplorerTable(QTableView):
         mime_data = QMimeData()
         # The text carried on the drag (could be dropped in any text editor)
         mime_data.setText("\n".join(self.selected_items_paths))
+        mime_data.setUrls([QUrl.fromLocalFile(p) for p in self.selected_items_paths])
         drag.setMimeData(mime_data)
 
         # Set the custom pixmap for the dragged item (no decorations)
@@ -418,14 +421,33 @@ class FileExplorerTable(QTableView):
         drag.setPixmap(pixmap)
 
         # Start the drag operation
-        drag.exec(Qt.DropAction.MoveAction)
+        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction | Qt.DropAction.LinkAction)
 
 
     def dropEvent(self, event):
+        is_external = not self.started_dragging
         self.started_dragging = False
         self.cancel_cut_items()
         self.viewport().update()
         self.drag_start_pos = None
+
+        if is_external:
+            if not event.mimeData().hasUrls():
+                return
+            source_paths = [url.toLocalFile() for url in event.mimeData().urls()
+                            if url.isLocalFile()]
+            if not source_paths:
+                return
+            dest_name = self.indexAt(event.position().toPoint()).data()
+            dest_path = (os.path.join(self.path, dest_name)
+                         if dest_name and os.path.isdir(os.path.join(self.path, dest_name))
+                         else self.path)
+            event.acceptProposedAction()
+            self.encompassing_uis_manager.paste_items(dest_path=dest_path,
+                                                      source_paths=source_paths,
+                                                      delete_source_after_paste=False)
+            return
+
         source_paths = self.selected_items_paths
         dest_name = self.indexAt(event.position().toPoint()).data()
         if dest_name is not None:
