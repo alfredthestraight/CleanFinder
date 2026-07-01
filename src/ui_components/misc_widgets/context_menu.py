@@ -2,6 +2,7 @@ import os
 from PySide6.QtWidgets import QMenu
 from src.utils.utils import configure_context_menu, add_actions_to_context_menu
 from src.utils.file_explorer_utils import change_items_names_case, open_file_as_app
+from src.utils.os_utils import open_path_in_terminal
 
 
 class NewFileCreationWrapper:
@@ -179,9 +180,14 @@ class ContextMenuDelegate:
                              "associated_method": lambda: self.file_exp_obj.zip_items(
                                  self.file_exp_obj.currently_selected_filename_indices)},
                             {"menu_item_name": "SEP"},  # Separating line
-                            {"menu_item_name": "Properties",
-                             "associated_method": self.file_exp_obj.open_properties}
                             ]
+            if len(items_list) == 1:
+                item_full_path = os.path.join(self.file_exp_obj.path, clicked_item_name)
+                terminal_path = item_full_path if os.path.isdir(item_full_path) else self.file_exp_obj.path
+                actions_list.append({"menu_item_name": "Open path in terminal",
+                                     "associated_method": lambda: open_path_in_terminal(terminal_path)})
+            actions_list.append({"menu_item_name": "Properties",
+                                 "associated_method": self.file_exp_obj.open_properties})
             self.append_to_context_menu(menu, actions_list)
 
         return menu

@@ -110,6 +110,8 @@ class ConfigurationsManager:
         self.HEADER_TEXT_FONT_SIZE = font_sizes["HEADER_TEXT_FONT_SIZE"]
         self.TEXTBOX_FONT_SIZE = font_sizes["TEXTBOX_FONT_SIZE"]
         self.TEXT_FONT_SIZE = font_sizes["TEXT_FONT_SIZE"]
+        self.FAVORITES_FONT_SIZE = font_sizes["FAVORITES_FONT_SIZE"]
+        self.TREE_FONT_SIZE = font_sizes["TREE_FONT_SIZE"]
         
         font_colors = self.config["fonts"]["font_colors"]
         self.BASE_GREY_COLOR = font_colors["BASE_GREY_COLOR"]
@@ -284,6 +286,8 @@ class ConfigurationsManager:
                     "TEXT_FONT_SIZE": 14,
                     "HEADER_TEXT_FONT_SIZE": 13,
                     "TEXTBOX_FONT_SIZE": 13,
+                    "FAVORITES_FONT_SIZE": 13,
+                    "TREE_FONT_SIZE": 14,
                 },
                 "font_colors": {
                     "BASE_GREY_COLOR": "rgb(236, 236, 236)",
@@ -561,6 +565,8 @@ class ConfigurationsManager:
             {"config_keys_path": ["fonts", "font_sizes", "TEXT_FONT_SIZE"], "display_text": "Table font size"},
             {"config_keys_path": ["fonts", "font_sizes", "HEADER_TEXT_FONT_SIZE"], "display_text": "Table header font size"},
             {"config_keys_path": ["fonts", "font_sizes", "TEXTBOX_FONT_SIZE"], "display_text": "Path textbox font size"},
+            {"config_keys_path": ["fonts", "font_sizes", "FAVORITES_FONT_SIZE"], "display_text": "Favorites font size"},
+            {"config_keys_path": ["fonts", "font_sizes", "TREE_FONT_SIZE"], "display_text": "Tree font size"},
 
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR"], "display_text": "Table font color - 1st column"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR_OTHER_COLS"], "display_text": "Table font color -  columns 2 to 4"},
@@ -669,6 +675,7 @@ class ConfigurationsManager:
               color: """ + self.LEFT_PANE_FONT_COLOR + """;                          /* Font color */
               selection-color: """ + self.LEFT_PANE_FONT_COLOR + """;                /* Font color when selecting row */
               selection-background-color: """ + self.SELECTION_COLOR + """;          /* Selected row color */
+              font-size: """+str(self.FAVORITES_FONT_SIZE)+"""px;
               font-family: '""" + self.TEXT_FONT + """';
             }
             """
@@ -696,7 +703,7 @@ class ConfigurationsManager:
               selection-background-color: """ + self.SELECTION_COLOR + """;          /* Selected row color */
               border: none;
               padding-bottom: 10px;
-              font-size: """+str(self.HEADER_TEXT_FONT_SIZE)+"""px;
+              font-size: """+str(self.TREE_FONT_SIZE)+"""px;
               font-family: '""" + self.TEXT_FONT + """';
             }
             """

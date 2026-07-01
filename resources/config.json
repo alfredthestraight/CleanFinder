@@ -14,8 +14,10 @@
             "font_sizes": {
                   "BOTTOM_TEXT_FONT_SIZE": 12,
                   "TEXT_FONT_SIZE": 14,
-                  "HEADER_TEXT_FONT_SIZE": 13,
-                  "TEXTBOX_FONT_SIZE": 13
+                  "HEADER_TEXT_FONT_SIZE": 14,
+                  "TEXTBOX_FONT_SIZE": 14,
+                  "FAVORITES_FONT_SIZE": 14,
+                  "TREE_FONT_SIZE": 17
             },
             "font_colors": {
                   "BASE_GREY_COLOR": "rgb(236, 236, 236)",
