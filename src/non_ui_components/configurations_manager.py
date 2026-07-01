@@ -616,6 +616,7 @@ class ConfigurationsManager:
                 border: none;
                 font-family: '""" + self.TEXT_FONT + """';
                 font-size: """+str(self.HEADER_TEXT_FONT_SIZE)+"""px;
+                font-weight: normal;                                      /* Prevent highlighted (current) section from rendering bold */
                 color: """ + self.FILE_EXPLORER_HEADER_FONT_COLOR + """;       /* Font color */
                 padding-left: 5px;                                        /* Text indentation */
             }
