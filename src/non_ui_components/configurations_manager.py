@@ -112,7 +112,13 @@ class ConfigurationsManager:
         self.TEXT_FONT_SIZE = font_sizes["TEXT_FONT_SIZE"]
         self.FAVORITES_FONT_SIZE = font_sizes["FAVORITES_FONT_SIZE"]
         self.TREE_FONT_SIZE = font_sizes["TREE_FONT_SIZE"]
-        
+
+        font_weights = self.config["fonts"]["font_weights"]
+        self.TEXT_FONT_WEIGHT = font_weights["TEXT_FONT_WEIGHT"]
+        self.HEADER_TEXT_FONT_WEIGHT = font_weights["HEADER_TEXT_FONT_WEIGHT"]
+        self.FAVORITES_FONT_WEIGHT = font_weights["FAVORITES_FONT_WEIGHT"]
+        self.TREE_FONT_WEIGHT = font_weights["TREE_FONT_WEIGHT"]
+
         font_colors = self.config["fonts"]["font_colors"]
         self.BASE_GREY_COLOR = font_colors["BASE_GREY_COLOR"]
         self.WINDOWS_FILE_EXPLORER_BLUE = font_colors["WINDOWS_FILE_EXPLORER_BLUE"]
@@ -288,6 +294,12 @@ class ConfigurationsManager:
                     "TEXTBOX_FONT_SIZE": 13,
                     "FAVORITES_FONT_SIZE": 13,
                     "TREE_FONT_SIZE": 14,
+                },
+                "font_weights": {
+                    "TEXT_FONT_WEIGHT": 400,
+                    "HEADER_TEXT_FONT_WEIGHT": 400,
+                    "FAVORITES_FONT_WEIGHT": 400,
+                    "TREE_FONT_WEIGHT": 400,
                 },
                 "font_colors": {
                     "BASE_GREY_COLOR": "rgb(236, 236, 236)",
@@ -568,6 +580,11 @@ class ConfigurationsManager:
             {"config_keys_path": ["fonts", "font_sizes", "FAVORITES_FONT_SIZE"], "display_text": "Favorites font size"},
             {"config_keys_path": ["fonts", "font_sizes", "TREE_FONT_SIZE"], "display_text": "Tree font size"},
 
+            {"config_keys_path": ["fonts", "font_weights", "TEXT_FONT_WEIGHT"], "display_text": "Table font weight (100=thin ... 400=normal ... 700=bold)"},
+            {"config_keys_path": ["fonts", "font_weights", "HEADER_TEXT_FONT_WEIGHT"], "display_text": "Table header font weight (100=thin ... 400=normal ... 700=bold)"},
+            {"config_keys_path": ["fonts", "font_weights", "FAVORITES_FONT_WEIGHT"], "display_text": "Favorites font weight (100=thin ... 400=normal ... 700=bold)"},
+            {"config_keys_path": ["fonts", "font_weights", "TREE_FONT_WEIGHT"], "display_text": "Tree font weight (100=thin ... 400=normal ... 700=bold)"},
+
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR"], "display_text": "Table font color - 1st column"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR_OTHER_COLS"], "display_text": "Table font color -  columns 2 to 4"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_HEADER_FONT_COLOR"], "display_text": "Table header font color"},
@@ -616,7 +633,7 @@ class ConfigurationsManager:
                 border: none;
                 font-family: '""" + self.TEXT_FONT + """';
                 font-size: """+str(self.HEADER_TEXT_FONT_SIZE)+"""px;
-                font-weight: normal;                                      /* Prevent highlighted (current) section from rendering bold */
+                font-weight: """+str(self.HEADER_TEXT_FONT_WEIGHT)+""";     /* Also pins the highlighted (current) section so it doesn't render bold */
                 color: """ + self.FILE_EXPLORER_HEADER_FONT_COLOR + """;       /* Font color */
                 padding-left: 5px;                                        /* Text indentation */
             }
@@ -677,6 +694,7 @@ class ConfigurationsManager:
               selection-color: """ + self.LEFT_PANE_FONT_COLOR + """;                /* Font color when selecting row */
               selection-background-color: """ + self.SELECTION_COLOR + """;          /* Selected row color */
               font-size: """+str(self.FAVORITES_FONT_SIZE)+"""px;
+              font-weight: """+str(self.FAVORITES_FONT_WEIGHT)+""";
               font-family: '""" + self.TEXT_FONT + """';
             }
             """
@@ -705,6 +723,7 @@ class ConfigurationsManager:
               border: none;
               padding-bottom: 10px;
               font-size: """+str(self.TREE_FONT_SIZE)+"""px;
+              font-weight: """+str(self.TREE_FONT_WEIGHT)+""";
               font-family: '""" + self.TEXT_FONT + """';
             }
             """
@@ -794,7 +813,7 @@ class ConfigurationsManager:
             border:  1px solid lightgrey;
             margin-top: -5px;
             margin-bottom: -5px;
-            font-weight: 100;
+            font-weight: """ + str(self.TEXT_FONT_WEIGHT) + """;
             };
             """
 
@@ -810,7 +829,7 @@ class ConfigurationsManager:
                 font-size: """ + str(self.TEXT_FONT_SIZE) + """px;
                 gridline-color: transparent;
                 padding-left: 0px;
-                font-weight: 100;
+                font-weight: """ + str(self.TEXT_FONT_WEIGHT) + """;
                 margin-right: 10px;
                 }
                 
