@@ -77,6 +77,8 @@ class ConfigurationsManager:
         self.FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR = colors["FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"]
         self.TOOLBAR_BACKGROUND_COLOR = colors["TOOLBAR_BACKGROUND_COLOR"]
         self.LEFT_PANE_BACKGROUND_COLOR = colors["LEFT_PANE_BACKGROUND_COLOR"]
+        # Color of the vertical line separating the left pane from the breadcrumbs/table
+        self.LEFT_PANE_SEPARATOR_COLOR = colors.get("LEFT_PANE_SEPARATOR_COLOR", "rgb(200, 200, 200)")
         self.BOTTOM_STRIP_COLOR = colors["BOTTOM_STRIP_COLOR"]
 
         self.FILE_EXPLORER_GRID_THICKNESS = self.config["FILE_EXPLORER_GRID_THICKNESS"]
@@ -200,6 +202,7 @@ class ConfigurationsManager:
                                     , "FILE_EXPLORER_ROW_HOVER_COLOR"
                                     , "FILE_EXPLORER_DRAGGED_ROW_HOVER_COLOR"
                                     , "LEFT_PANE_BACKGROUND_COLOR"
+                                    , "LEFT_PANE_SEPARATOR_COLOR"
                                     , "FILE_EXPLORER_HEADER_COLOR"
                                     , "FILE_EXPLORER_BACKGROUND_COLOR"
                                     , "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"
@@ -213,6 +216,8 @@ class ConfigurationsManager:
 
         self.FOLDERS_ALWAYS_ABOVE_FILES = self.config["FOLDERS_ALWAYS_ABOVE_FILES"]
         self.SHOW_FAVORITES_TITLE = self.config["SHOW_FAVORITES_TITLE"]
+        # Dual-pane mode: two file-explorer panes side by side (applies to new windows)
+        self.DUAL_PANE_MODE = self.config.get("DUAL_PANE_MODE", "N")
 
 
     # Y/N features
@@ -237,6 +242,17 @@ class ConfigurationsManager:
             self._SHOW_FAVORITES_TITLE = True
         else:
             self._SHOW_FAVORITES_TITLE = False
+
+    @property
+    def DUAL_PANE_MODE(self):
+        return self._DUAL_PANE_MODE
+
+    @DUAL_PANE_MODE.setter
+    def DUAL_PANE_MODE(self, value):
+        if value in ['Y', 'y']:
+            self._DUAL_PANE_MODE = True
+        else:
+            self._DUAL_PANE_MODE = False
 
     @property
     def SHOW_HIDDEN_ITEMS(self):
@@ -280,6 +296,7 @@ class ConfigurationsManager:
             "FILE_EXPLORER_SHOW_ROW_NUMBERS": "N",
             "FOLDERS_ALWAYS_ABOVE_FILES": "Y",
             "SHOW_HIDDEN_ITEMS": "N",
+            "DUAL_PANE_MODE": "N",
             "scrollbar": {
                 "SCROLLBAR_COLOR": "rgb(200, 207, 210)",
                 "SCROLLBAR_BACKGROUND_COLOR": "rgb(250, 250, 250)",
@@ -325,6 +342,7 @@ class ConfigurationsManager:
                 "FILE_EXPLORER_ROW_HOVER_COLOR": "rgb(240, 240, 240)",
                 "FILE_EXPLORER_DRAGGED_ROW_HOVER_COLOR": "rgb(140, 200, 240)",
                 "LEFT_PANE_BACKGROUND_COLOR": "rgb(255, 255, 255)",
+                "LEFT_PANE_SEPARATOR_COLOR": "rgb(200, 200, 200)",
                 "FILE_EXPLORER_HEADER_COLOR": "rgb(255, 255, 255)",
                 "FILE_EXPLORER_BACKGROUND_COLOR": "rgb(255, 255, 255)",
                 "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR": "rgb(255, 255, 255)",
@@ -500,7 +518,8 @@ class ConfigurationsManager:
             if not os.path.exists(new_att_value):
                 pass
         elif att in ['FILE_EXPLORER_SHOW_ROW_NUMBERS', 'FILE_EXPLORER_ALTERNATING_ROW_COLORS',
-                     'FOLDERS_ALWAYS_ABOVE_FILES', 'SHOW_HIDDEN_ITEMS', 'SHOW_FAVORITES_TITLE']:
+                     'FOLDERS_ALWAYS_ABOVE_FILES', 'SHOW_HIDDEN_ITEMS', 'SHOW_FAVORITES_TITLE',
+                     'DUAL_PANE_MODE']:
             if new_att_value not in ['Y', 'y', 'N', 'n']:
                 pass
         elif att == 'DATE_FORMAT':
@@ -571,6 +590,7 @@ class ConfigurationsManager:
             {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
             {"config_keys_path": ["FOLDERS_ALWAYS_ABOVE_FILES"], "display_text": "Alywas show folders above files"},
             {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
+            {"config_keys_path": ["DUAL_PANE_MODE"], "display_text": "Dual pane mode - two panes side by side (Y/N, applies to new windows)"},
 
 
             {"config_keys_path": ["fonts", "TEXT_FONT"], "display_text": "Font"},
@@ -604,6 +624,7 @@ class ConfigurationsManager:
             {"config_keys_path": ["colors", "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"], "display_text": "Table alternate background color"},
 
             {"config_keys_path": ["colors", "LEFT_PANE_BACKGROUND_COLOR"], "display_text": "Left pane background color"},
+            {"config_keys_path": ["colors", "LEFT_PANE_SEPARATOR_COLOR"], "display_text": "Left pane separator line color"},
             {"config_keys_path": ["fonts", "font_colors", "LEFT_PANE_FONT_COLOR"], "display_text": "Left pane font color"},
             {"config_keys_path": ["fonts", "font_row_heights", "FILE_EXPLORER_ROW_HEIGHT"], "display_text": "Table row height"},
             {"config_keys_path": ["fonts", "font_row_heights", "FAVORITES_ROW_HEIGHT"], "display_text": "Favorites row height"},

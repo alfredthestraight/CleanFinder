@@ -33,7 +33,7 @@ def map_shortcut_name_to_func(file_explorer_obj, action_name: str):
         "OPEN_FILE_IN_TERMINAL": file_explorer_obj.open_path_in_terminal,
         "SELECT_ALL_UNTIL_END": file_explorer_obj.select_all_items_from_curr_to_end,
         "SELECT_ALL_UNTIL_START": file_explorer_obj.select_all_items_from_curr_to_head,
-        "JUMP_TO_PATH_TEXTBOX": file_explorer_obj.encompassing_ui.expose_input_textbox,
+        "JUMP_TO_PATH_TEXTBOX": file_explorer_obj.encompassing_ui.jump_to_path_textbox,
         "OPEN_CONTEXT_MENU": file_explorer_obj.trigger_context_menu
     }[action_name]
 

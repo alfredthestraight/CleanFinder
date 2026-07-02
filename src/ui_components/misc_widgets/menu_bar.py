@@ -336,8 +336,9 @@ class MebuBarManager(QMainWindow):
             conf.set_attr(r['config_keys_path'], typed_value)
 
         for w in self.uis_manager.windows:
-            w.file_explorer.vertical_scrollbar.update()
-            w.file_explorer.horizontal_scrollbar.update()
+            for t in w.all_tables():
+                t.vertical_scrollbar.update()
+                t.horizontal_scrollbar.update()
         self.uis_manager.refresh_all_configurations()
 
     def new_folder(self):

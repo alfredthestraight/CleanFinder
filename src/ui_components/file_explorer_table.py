@@ -704,7 +704,7 @@ class FileExplorerTable(QTableView):
             self.encompassing_uis_manager.get_columns_ordering_scheme(new_path))
         self.connect_filesystem_watcher()
 
-        self.encompassing_ui.path_changed(new_path, reset_tree_selection)
+        self.encompassing_ui.path_changed(self, new_path, reset_tree_selection)
 
         if direction is not None:
             self.browsing_history_manager.move_to_path_in_direction(direction)
@@ -859,7 +859,7 @@ class FileExplorerTable(QTableView):
         self.last_selected_index = selected.indexes()[0] if len(selected.indexes()) > 0 else None
         size_items = beautify_bytes_size(self.total_size_of_selected_files())[2]
         num_items = len(self.currently_selected_filename_indices)
-        self.encompassing_ui.refresh_bottom_toolbar_text(num_items, size_items)
+        self.encompassing_ui.refresh_bottom_toolbar_text(self, num_items, size_items)
         self.last_selection_change_time = time_now
 
 
@@ -1043,6 +1043,13 @@ class FileExplorerTable(QTableView):
             self.select_rows(0, self.first_selected_item_index.row())
             self.row_selection_extender.reset()
 
+
+    def focusInEvent(self, event):
+        # Mark this table's pane as the active one whenever it gains focus
+        # (click, Tab, or programmatic setFocus). No-op in single-pane mode.
+        if self.encompassing_ui is not None:
+            self.encompassing_ui.set_active_pane_by_table(self)
+        super().focusInEvent(event)
 
     # Key press events in general (not related to any specific widget)
     def keyPressEvent(self, e):

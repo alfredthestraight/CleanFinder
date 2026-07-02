@@ -121,6 +121,11 @@ def is_legal_key_sequence(key_seq: str) -> bool:
 def create_qaction_key_sequence(obj, key_sequence: str, when_triggered: Callable):
     newTableAction = QAction(obj)
     newTableAction.setShortcut(QKeySequence(key_sequence))
+    # Scope the shortcut to the widget (and its children) that owns it. Otherwise,
+    # with two file-explorer panes in one window both registering the same keys,
+    # Qt sees an ambiguous shortcut overload and fires none of them. This also
+    # routes each shortcut to whichever pane currently has focus (the active pane).
+    newTableAction.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
     newTableAction.triggered.connect(when_triggered)
     obj.addAction(newTableAction)
 

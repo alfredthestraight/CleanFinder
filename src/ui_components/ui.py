@@ -162,6 +162,24 @@ def create_toolbar(parent, w: Union[int, None] = None, h: Union[int, None] = Non
     return toolbar
 
 
+class Pane:
+    """
+    Groups the per-pane widgets so a single `ui` window can hold one or more
+    file-explorer panes side by side. Each pane owns its own data model, table,
+    and a breadcrumb navigator + editable path textbox (which live in the shared
+    top toolbar, on the same row as the navigation buttons).
+    """
+    def __init__(self):
+        self.model = None            # PandasModel
+        self.table = None            # FileExplorerTable
+        self.navigator = None        # TextboxNavigator (breadcrumb)
+        self.textbox = None          # QLineEdit (editable path input)
+        self.event_filter = None     # textboxEventFilter for `textbox`
+        self.stacked_widget = None   # toggles navigator <-> textbox
+        self.top_toolbar = None      # per-pane top band holding stacked_widget
+        self.column = None           # QWidget stacking top_toolbar over the table
+
+
 class ui(QtWidgets.QMainWindow):
 
     def __init__(self, encompassing_uis_manager, root_dir_path,
@@ -183,35 +201,33 @@ class ui(QtWidgets.QMainWindow):
         self.configure_splitter()
 
         """
-         Top area: toolar + stacked_widget (containing both textbox-navigator and textbox)
+         Main horizontal split: [ left column | file-explorer pane(s) ].
+         Each column carries its own top band (buttons over the sidebar, a breadcrumb
+         over each table), so every top band lines up on one row and each breadcrumb
+         stays directly above its own table column as the splitter is dragged.
         """
-        logger.info("ui - init top area")
-        self.generate_top_toolbar()
-        self.generate_textbox_navigator()
-
-        self.stacked_widget = QStackedWidget()
-        self.stacked_widget.addWidget(self.textbox_navigator)
-        self.stacked_widget.addWidget(self.textbox)
-        self.toolbar.addWidget(self.stacked_widget)
-
+        logger.info("ui - init main split")
         self.subsplitter = QSplitter(Qt.Orientation.Horizontal, parent=self.splitter)
-
-        # setSizePolicy
         self.subsplitter.splitterMoved.connect(self.update_structure)
-
-        # Create a vertical line separating the subsplitter from the rest of the splitter
-        self.subsplitter.setHandleWidth(0)
-        self.subsplitter.setStyleSheet(
-            """QSplitter::handle:vertical{background-color: lightgrey; height: 0px;}""")
+        self.subsplitter.setHandleWidth(1)
+        self.subsplitter.setStyleSheet(self._left_pane_separator_style())
 
 
         """
-         Left pane: Favorites + Tree
+         Left column: navigation buttons on top, Favorites + Tree below
         """
-        logger.info("ui - init left pane")
+        logger.info("ui - init left column")
+        self.left_column = QWidget()
+        self.left_column_layout = QVBoxLayout(self.left_column)
+        self.left_column_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_column_layout.setSpacing(0)
+
+        self.generate_top_toolbar()
+        self.left_column_layout.addWidget(self.toolbar)
+
         hght = conf.WINDOW_HEIGHT - (conf.TOP_TOOLBAR_HEIGHT + conf.BOTTOM_TOOLBAR_HEIGHT)
         self.trees_subsplitter = \
-            CustomSizeQSplitter(type=Qt.Orientation.Vertical, parent=self.subsplitter,
+            CustomSizeQSplitter(type=Qt.Orientation.Vertical, parent=self.left_column,
                                 default_height=hght)
         self.trees_subsplitter.setStyleSheet(
             """QSplitter{background-color : """ + conf.LEFT_PANE_BACKGROUND_COLOR + """;}""")
@@ -228,25 +244,36 @@ class ui(QtWidgets.QMainWindow):
         self.favorites_area.addStretch(1)
 
         self.tree_area = QVBoxLayout(self.trees_subsplitter)
-        # self.tree_area = QVBoxLayout()
         self.tree = TreeFileExplorer(parent=self.trees_subsplitter, encompassing_ui=self)
         self.tree.expandAll()
         self.tree_area.addWidget(self.tree)
 
+        self.left_column_layout.addWidget(self.trees_subsplitter)
+        self.subsplitter.addWidget(self.left_column)
+
 
         """
-         Right pane: File explorer
+         Right area: one or two file-explorer panes side by side, each a column of
+         [ breadcrumb navigator | table ].
         """
-        logger.info("ui - init right pane")
-        self.file_explorer_layout = QVBoxLayout(self.subsplitter)
-        self.pandasModel = PandasModel(datapath=root_dir_path,
-                                       columns_ordering_scheme=columns_ordering_scheme)
+        logger.info("ui - init right area (panes)")
+        self.panes = []
+        self._active_pane_index = 0
+        self.panes_splitter = QSplitter(Qt.Orientation.Horizontal, parent=self.subsplitter)
+        self.panes_splitter.setHandleWidth(5)
+        # Light grey vertical separating line between the two panes (dual-pane mode).
+        # The handle stays 5px wide for easy dragging; only a 1px line is drawn.
+        self.panes_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal{background-color: transparent;"
+            " border-left: 1px solid lightgrey;}")
+        self.panes_splitter.splitterMoved.connect(self.update_structure)
         hght = height-(conf.TOP_TOOLBAR_HEIGHT + conf.BOTTOM_TOOLBAR_HEIGHT)
-        self.file_explorer = FileExplorerTable(self.pandasModel, parent=self.subsplitter,
-                                               root_dir_path=root_dir_path,
-                                               xdim=file_explorer_width,
-                                               ydim=hght, encompassing_ui=self)
-        self.file_explorer_layout.addWidget(self.file_explorer)
+        num_panes = 2 if conf.DUAL_PANE_MODE else 1
+        for _ in range(num_panes):
+            pane = self._create_pane(root_dir_path, columns_ordering_scheme,
+                                     file_explorer_width, hght)
+            self.panes.append(pane)
+            self.panes_splitter.addWidget(pane.column)
 
 
 
@@ -254,6 +281,7 @@ class ui(QtWidgets.QMainWindow):
          Bottom area: bottom toolbar
         """
         logger.info("ui - init bottom area")
+        self.config_upper_toolbar_text_and_dims()
         self.generate_bottom_toolbar()
         self.config_bottom_toolbar_text_and_dims()
 
@@ -265,12 +293,12 @@ class ui(QtWidgets.QMainWindow):
         # shortcut2.activated.connect(self.expose_input_textbox)
         
 
-        self.textbox_navigator.update_path(self.path)
+        for pane in self.panes:
+            pane.navigator.update_path(pane.table.path)
 
         self.setAcceptDrops(True)
         self.splitter.setAcceptDrops(True)
         self.subsplitter.setAcceptDrops(True)
-        self.file_explorer.viewport().setAcceptDrops(True)
 
         self.installEventFilter(self)
 
@@ -279,8 +307,9 @@ class ui(QtWidgets.QMainWindow):
         logger.info("ui - setting dimensions")
         self.subsplitter.setStretchFactor(left_pane_width/file_explorer_width, 1)
         self.trees_subsplitter.resize(self.trees_subsplitter.sizeHint())
-        self.file_explorer.resize(self.file_explorer.sizeHint())
-        self.file_explorer.setFocus()
+        for pane in self.panes:
+            pane.table.resize(pane.table.sizeHint())
+        self.panes[0].table.setFocus()
 
         # Must come in the end (otherwise may be overridden)
         self.set_ui_sizes()
@@ -294,22 +323,61 @@ class ui(QtWidgets.QMainWindow):
 
 
     @property
+    def file_explorer(self):
+        """The active pane's table. Keeps 'act on the current table' semantics for
+        all the shared controls (toolbar buttons, tree, favorites, keyboard)."""
+        return self.panes[self._active_pane_index].table
+
+    @property
+    def active_pane(self):
+        return self.panes[self._active_pane_index]
+
+    def all_tables(self):
+        return [p.table for p in self.panes]
+
+    def _pane_of(self, table):
+        for p in self.panes:
+            if p.table is table:
+                return p
+        return self.active_pane
+
+    def set_active_pane(self, pane):
+        try:
+            self._active_pane_index = self.panes.index(pane)
+        except ValueError:
+            return
+        # Reflect the newly-active pane in the shared window chrome
+        self.splitter.setWindowTitle(get_last_part_in_path(pane.table.path))
+        self.refresh_bottom_toolbar_text(pane.table)
+
+    def set_active_pane_by_table(self, table):
+        if not getattr(self, 'panes', None):
+            return
+        self.set_active_pane(self._pane_of(table))
+
+    @property
     def path(self):
         return self.file_explorer.path
 
     def switch_table_focus(self):
-        if self.file_explorer.hasFocus():
-            target = self.favs_table_view
-        else:
+        targets = [self.favs_table_view] + self.all_tables()
+        idx = 0
+        for i, t in enumerate(targets):
+            if t.hasFocus():
+                idx = i
+                break
+        nxt = targets[(idx + 1) % len(targets)]
+        if nxt is not self.favs_table_view:
             self.favs_table_view.clearSelection()
-            target = self.file_explorer
-        target.setFocus()
+        nxt.setFocus()
 
     def change_path(self, newpath: str, reset_path_history: bool = True):
         self.file_explorer.change_path(newpath, reset_path_history=reset_path_history)
 
     def sizeHint(self):
-        return QSize(self.left_pane_width + self.file_explorer_width + 50, self.height)
+        num_panes = len(self.panes) if hasattr(self, 'panes') else 1
+        return QSize(self.left_pane_width + num_panes * self.file_explorer_width + 50,
+                     self.height)
 
     def configure_splitter(self):
         self.splitter.setWindowTitle(get_last_part_in_path(conf.DEFAULT_PATH))
@@ -317,8 +385,14 @@ class ui(QtWidgets.QMainWindow):
         self.splitter.setHandleWidth(5)  # The gap size between the textbox and the table
         self.splitter.setStyleSheet(conf.GAP_BETWEEN_TOOLBAR_AND_BELOW_STYLE)
 
+    def _left_pane_separator_style(self):
+        # The vertical line separating the left pane from the breadcrumbs/table.
+        # subsplitter is horizontal, so its handle is styled via ::handle:horizontal.
+        return ("QSplitter::handle:horizontal{background-color: "
+                + conf.LEFT_PANE_SEPARATOR_COLOR + ";}")
+
     def generate_top_toolbar(self):
-        self.toolbar = create_toolbar(parent=self.splitter)
+        self.toolbar = create_toolbar(parent=self.left_column)
         # Buttons (can appear stand-alone, in a menubar, etc...)
         up_button = create_action(self, icon_path=get_full_icon_path(conf.UP_ICON_NAME),
                                   when_triggered=self.go_to_parent_dir)
@@ -333,36 +407,71 @@ class ui(QtWidgets.QMainWindow):
         self.toolbar.addAction(up_button)
 
 
-    def generate_textbox_navigator(self):
-        self.textbox = create_textbox(self.toolbar)
-        self._textbox_event_filter = self.textboxEventFilter(self)   # Custom event class (pt. 1)
-        self.textbox.installEventFilter(self._textbox_event_filter)  # Custom event class (pt. 1)
+    def _build_navigator(self, pane):
+        # Breadcrumb navigator wired to act on THIS pane: clicking a path button
+        # navigates the pane (and makes it active); clicking the empty area exposes
+        # the pane's editable textbox.
+        def navigate(path, reset_path_history=True):
+            self.set_active_pane(pane)
+            pane.table.change_path(path, reset_path_history=reset_path_history)
 
-        self.textbox_navigator = \
-            TextboxNavigator(encompassing_obj=self,
-                             method_when_clicked_on_path_btn=self.change_path,
-                             method_when_clicked_on_empty_area=self.expose_input_textbox,
-                             default_height=conf.TOP_TOOLBAR_HEIGHT)
+        return TextboxNavigator(encompassing_obj=self,
+                                method_when_clicked_on_path_btn=navigate,
+                                method_when_clicked_on_empty_area=lambda: self.expose_input_textbox(pane),
+                                default_height=conf.TOP_TOOLBAR_HEIGHT)
 
-        self.config_upper_toolbar_text_and_dims()
-        # Behind the textbox navigator there's an actual textbox
+    def _create_pane(self, root_dir_path, columns_ordering_scheme, xdim, ydim):
+        pane = Pane()
+        pane.model = PandasModel(datapath=root_dir_path,
+                                 columns_ordering_scheme=columns_ordering_scheme)
+        pane.table = FileExplorerTable(pane.model, parent=self.panes_splitter,
+                                       root_dir_path=root_dir_path,
+                                       xdim=xdim, ydim=ydim, encompassing_ui=self)
+
+        pane.textbox = create_textbox(self)
+        pane.event_filter = self.textboxEventFilter(self, pane)
+        pane.textbox.installEventFilter(pane.event_filter)
+        pane.navigator = self._build_navigator(pane)
+
+        # Behind the breadcrumb navigator there's an actual editable textbox.
+        pane.stacked_widget = QStackedWidget()
+        pane.stacked_widget.addWidget(pane.navigator)
+        pane.stacked_widget.addWidget(pane.textbox)
+
+        # Each pane is a column of [ breadcrumb toolbar | table ]. The per-pane top
+        # toolbar sits at the same height as the left column's button toolbar, so all
+        # top bands align on one row, and the breadcrumb stays directly above its table.
+        pane.top_toolbar = create_toolbar(parent=self)
+        pane.top_toolbar.addWidget(pane.stacked_widget)
+
+        pane.column = QWidget()
+        col_layout = QVBoxLayout(pane.column)
+        col_layout.setContentsMargins(0, 0, 0, 0)
+        col_layout.setSpacing(0)
+        col_layout.addWidget(pane.top_toolbar)
+        col_layout.addWidget(pane.table)
+
+        pane.table.viewport().setAcceptDrops(True)
+        return pane
 
 
     def config_upper_toolbar_text_and_dims(self):
-        set_object_font(self.textbox, font_size=int(conf.TEXTBOX_FONT_SIZE),
-                        font_family=conf.TEXT_FONT)
-        fm = self.textbox.fontMetrics()
         height = conf.TEXTBOX_FONT_SIZE
         self.toolbar.setFixedHeight(height + 28)
-        self.textbox_navigator.setFixedHeight(height + 20)
-        self.textbox.setFixedHeight(height + 20)
-        self.textbox_navigator.update_fonts()
+        for pane in self.panes:
+            # Match the left column's button toolbar height so every top band aligns
+            pane.top_toolbar.setFixedHeight(height + 28)
+            set_object_font(pane.textbox, font_size=int(conf.TEXTBOX_FONT_SIZE),
+                            font_family=conf.TEXT_FONT)
+            pane.navigator.setFixedHeight(height + 20)
+            pane.textbox.setFixedHeight(height + 20)
+            pane.stacked_widget.setFixedHeight(height + 20)
+            pane.navigator.update_fonts()
 
 
     def config_bottom_toolbar_text_and_dims(self):
         set_object_font(self.bottom_label, font_size=int(conf.BOTTOM_TEXT_FONT_SIZE),
                         font_family=conf.TEXT_FONT)
-        fm = self.textbox.fontMetrics()
         height = conf.BOTTOM_TEXT_FONT_SIZE
         self.bottom_toolbar.setFixedHeight(height + 12)
 
@@ -409,7 +518,8 @@ class ui(QtWidgets.QMainWindow):
         self.bottom_toolbar.addWidget(self.bottom_label)
 
     def reload_keyboard_shortcuts(self):
-        self.file_explorer.initialize_all_key_sequences()
+        for t in self.all_tables():
+            t.initialize_all_key_sequences()
 
     def dragEnterEvent(self, event):
         # Accept the drag if the event contains text
@@ -444,19 +554,27 @@ class ui(QtWidgets.QMainWindow):
 
 
     def update_structure(self):
-        self.file_explorer.adapt_width_of_last_column()
+        for t in self.all_tables():
+            t.adapt_width_of_last_column()
         self.update_structure_in_config()
 
-    def path_changed(self, new_path: str, reset_tree_selection: bool):
-        if reset_tree_selection:
-            self.tree.clearSelection()
-        self.textbox.setText(new_path)
-        self.textbox_navigator.update_path(new_path)
-        self.splitter.setWindowTitle(get_last_part_in_path(new_path))
-        self.refresh_bottom_toolbar_text()
+    def path_changed(self, source_table, new_path: str, reset_tree_selection: bool):
+        pane = self._pane_of(source_table)
+        # Always keep the originating pane's own breadcrumb + textbox in sync
+        pane.navigator.update_path(new_path)
+        pane.textbox.setText(new_path)
+        # Shared chrome (tree selection, window title, bottom bar) tracks the active pane
+        if source_table is self.file_explorer:
+            if reset_tree_selection:
+                self.tree.clearSelection()
+            self.splitter.setWindowTitle(get_last_part_in_path(new_path))
+            self.refresh_bottom_toolbar_text(source_table)
 
-    def refresh_bottom_toolbar_text(self, num_items_selected: int = None,
+    def refresh_bottom_toolbar_text(self, source_table=None, num_items_selected: int = None,
                                     size_of_items_selected: int = None):
+        # Only the active pane drives the shared bottom status bar
+        if source_table is not None and source_table is not self.file_explorer:
+            return
         if num_items_selected is None:
             self.bottom_label.setText('')
         else:
@@ -467,35 +585,44 @@ class ui(QtWidgets.QMainWindow):
             self.bottom_label.setText(str(num_items_selected) + items_str + size_of_items_selected)
 
 
-    def expose_input_textbox(self):
-        self.textbox.selectAll()
-        self.stacked_widget.setCurrentWidget(self.textbox)
-        self.textbox.setFocus()
+    def expose_input_textbox(self, pane=None):
+        if pane is None:
+            pane = self.active_pane
+        self.set_active_pane(pane)
+        pane.textbox.selectAll()
+        pane.stacked_widget.setCurrentWidget(pane.textbox)
+        pane.textbox.setFocus()
 
-    def hide_input_textbox(self):
-        self.textbox.setText(self.path)
-        self.stacked_widget.setCurrentWidget(self.textbox_navigator)
+    def hide_input_textbox(self, pane):
+        pane.textbox.setText(pane.table.path)
+        pane.stacked_widget.setCurrentWidget(pane.navigator)
+
+    def jump_to_path_textbox(self):
+        # Bound to the JUMP_TO_PATH_TEXTBOX keyboard shortcut (fires on the focused
+        # table, so the active pane is the right one to expose).
+        self.expose_input_textbox(self.active_pane)
 
 
     class textboxEventFilter(QtCore.QObject):
-        def __init__(self, encompassing_ui):
+        def __init__(self, encompassing_ui, pane):
             super().__init__()
             self.encompassing_ui = encompassing_ui
+            self.pane = pane
 
         def eventFilter(self, source, event):
             if (event.type() == QEvent.Type.KeyPress):
                 if (event.key() == Qt.Key.Key_Escape):
-                    self.encompassing_ui.hide_input_textbox()
-                    self.encompassing_ui.file_explorer.setFocus()
+                    self.encompassing_ui.hide_input_textbox(self.pane)
+                    self.pane.table.setFocus()
                 elif (event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return):
-                    if os.path.exists(self.encompassing_ui.textbox.text()):
+                    if os.path.exists(self.pane.textbox.text()):
                         try:
-                            self.encompassing_ui.change_path(self.encompassing_ui.textbox.text())
-                            self.encompassing_ui.hide_input_textbox()
+                            self.pane.table.change_path(self.pane.textbox.text())
+                            self.encompassing_ui.hide_input_textbox(self.pane)
                         except:
                             pass
             elif event.type() == QtCore.QEvent.Type.FocusOut:
-                self.encompassing_ui.hide_input_textbox()
+                self.encompassing_ui.hide_input_textbox(self.pane)
 
             return super().eventFilter(source, event)
 
@@ -549,11 +676,16 @@ class ui(QtWidgets.QMainWindow):
         self.search_window.show()
 
     def set_ui_sizes(self):
-        self.resize(conf.LEFT_PANE_WIDTH+conf.FILE_EXPLORER_WIDTH, conf.WINDOW_HEIGHT)
-        self.subsplitter.setSizes([conf.LEFT_PANE_WIDTH, conf.FILE_EXPLORER_WIDTH])
+        num_panes = len(self.panes)
+        self.resize(conf.LEFT_PANE_WIDTH + num_panes * conf.FILE_EXPLORER_WIDTH,
+                    conf.WINDOW_HEIGHT)
+        self.subsplitter.setSizes([conf.LEFT_PANE_WIDTH,
+                                   num_panes * conf.FILE_EXPLORER_WIDTH])
         # If user resizes the entire window, the left pane will not be resized:
         self.subsplitter.setStretchFactor(0, 0)
         self.subsplitter.setStretchFactor(1, 1)
+        if num_panes > 1:
+            self.panes_splitter.setSizes([conf.FILE_EXPLORER_WIDTH] * num_panes)
 
     def refresh_all_configurations(self):
         logger.info("ui.refresh_all_configurations")
@@ -561,27 +693,33 @@ class ui(QtWidgets.QMainWindow):
             self.favs_table_view_header.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
         self.favs_table_view.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
         self.toolbar.setStyleSheet(conf.TOOLBAR_STYLE)
-        self.textbox.setStyleSheet(conf.TEXTBOX_STYLE)
-        self.textbox_navigator.setStyleSheet(conf.TEXTBOX_NAVIGATOR_STYLE)
+        self.subsplitter.setStyleSheet(self._left_pane_separator_style())
         self.tree.setStyleSheet(conf.TREE_STYLE)
-        for btn in self.textbox_navigator.toolbar_buttons:
-            btn.setStyleSheet(conf.TEXTBOX_NAVIGATOR_BUTTON_STYLE)
+        for pane in self.panes:
+            pane.top_toolbar.setStyleSheet(conf.TOOLBAR_STYLE)
+            pane.textbox.setStyleSheet(conf.TEXTBOX_STYLE)
+            pane.navigator.setStyleSheet(conf.TEXTBOX_NAVIGATOR_STYLE)
+            for btn in pane.navigator.toolbar_buttons:
+                btn.setStyleSheet(conf.TEXTBOX_NAVIGATOR_BUTTON_STYLE)
+            pane.table.refresh_all_configurations()
         self.bottom_toolbar.setStyleSheet(conf.BOTTOM_TOOLBAR_STYLE)
         self.bottom_label.setMaximumHeight(conf.BOTTOM_TEXT_FONT_SIZE)
         self.bottom_label.setStyleSheet(conf.BOTTOM_TOOLBAR_TEXT_STYLE)  # Top, Right, Bottom, Left
-        self.file_explorer.refresh_all_configurations()
 
     def update_structure_in_config(self):
         logger.info("ui.update_structure_in_config")
         if self._allow_structure_updates:
+            # Persist column/window widths from the first (left) pane so the two
+            # panes don't fight over the shared FILE_EXPLORER_* config keys.
+            table0 = self.panes[0].table
             conf.set_attr("WINDOW_HEIGHT", self.splitter.height())
-            conf.set_attr("FILE_EXPLORER_WIDTH", self.file_explorer.width())
+            conf.set_attr("FILE_EXPLORER_WIDTH", table0.width())
             conf.set_attr("LEFT_PANE_WIDTH", self.subsplitter.sizes()[0])
             conf.set_attr("BOTTOM_TOOLBAR_HEIGHT", self.bottom_toolbar.height())
-            conf.set_attr("FILE_EXPLORER_COL_WIDTH_1", self.file_explorer.columnWidth(0))
-            conf.set_attr("FILE_EXPLORER_COL_WIDTH_2", self.file_explorer.columnWidth(1))
-            conf.set_attr("FILE_EXPLORER_COL_WIDTH_3", self.file_explorer.columnWidth(2))
-            conf.set_attr("FILE_EXPLORER_COL_WIDTH_4", self.file_explorer.columnWidth(3))
+            conf.set_attr("FILE_EXPLORER_COL_WIDTH_1", table0.columnWidth(0))
+            conf.set_attr("FILE_EXPLORER_COL_WIDTH_2", table0.columnWidth(1))
+            conf.set_attr("FILE_EXPLORER_COL_WIDTH_3", table0.columnWidth(2))
+            conf.set_attr("FILE_EXPLORER_COL_WIDTH_4", table0.columnWidth(3))
 
     def on_close(self):
         self.encompassing_uis_manager.on_ui_close(self)

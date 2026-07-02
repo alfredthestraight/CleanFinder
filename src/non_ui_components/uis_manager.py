@@ -143,7 +143,8 @@ class UiWindowManager(QMainWindow):
 
     def refresh_all_uis(self):
         for w in self.windows:
-            w.file_explorer._refresh_source_data()
+            for t in w.all_tables():
+                t._refresh_source_data()
 
     def reload_keyboard_shortcuts(self):
         for w in self.windows:
@@ -151,7 +152,8 @@ class UiWindowManager(QMainWindow):
 
     def remove_paths_and_subpaths_from_browsing_histories(self, paths: list[str]):
         for w in self.windows:
-            w.file_explorer.browsing_history_manager.remove_paths_and_subpaths_from_history(paths)
+            for t in w.all_tables():
+                t.browsing_history_manager.remove_paths_and_subpaths_from_history(paths)
 
     def paste_items_from_clipboard(self, dest_path: str, delete_source_after_paste: bool):
         self.pasting_delegate.paste_items_from_clipboard(dest_path, delete_source_after_paste)
@@ -182,9 +184,10 @@ class UiWindowManager(QMainWindow):
     def select_pasted_items_where_ui_is_in_path(self, path: str, items: list[str]):
         logger.info("UiWindowManager.select_pasted_items_where_ui_is_in_path")
         for w in self.windows:
-            if w.file_explorer.path == path:
-                w.file_explorer.clearSelection()
-                w.file_explorer.delayed_select_rows_where_items_texts_are(items)
+            for t in w.all_tables():
+                if t.path == path:
+                    t.clearSelection()
+                    t.delayed_select_rows_where_items_texts_are(items)
 
     def switch_ordering_of_file_explorer_column(self, col_ind: int, path: str):
         logger.info("UiWindowManager.switch_ordering_of_file_explorer_column")
@@ -222,7 +225,8 @@ class UiWindowManager(QMainWindow):
     def cut_items_names(self, newpaths: list[str]):
         self._cut_items_names = newpaths
         for w in self.windows:
-            w.file_explorer.pandasModel.cut_items = self._cut_items_names
+            for t in w.all_tables():
+                t.pandasModel.cut_items = self._cut_items_names
 
     @property
     def cut_items_path(self):
@@ -232,12 +236,14 @@ class UiWindowManager(QMainWindow):
     def cut_items_path(self, path: str):
         self._cut_items_path = path
         for w in self.windows:
-            w.file_explorer.pandasModel.cut_items_path = self._cut_items_path
+            for t in w.all_tables():
+                t.pandasModel.cut_items_path = self._cut_items_path
 
     def cancel_cut_items(self):
         self.cut_items_names = []
         for w in self.windows:
-            w.file_explorer.pandasModel.cut_items = []
+            for t in w.all_tables():
+                t.pandasModel.cut_items = []
 
     def create_new_window(self, root_dir_path: str = SYSTEM_ROOT_DIR,
                           ydim: int = conf.WINDOW_HEIGHT,
