@@ -461,6 +461,15 @@ class ConfigurationsManager:
                 ],
                 "OPEN_CONTEXT_MENU": [
                       "Meta+Space"
+                ],
+                "SWITCH_PANE_FOCUS": [
+                      "Tab"
+                ],
+                "SWITCH_PANE_FOCUS_BACKWARDS": [
+                      "Shift+Tab"
+                ],
+                "CLOSE_WINDOW": [
+                      "Ctrl+W"
                 ]
             },
             "sorting": {
@@ -769,6 +778,20 @@ class ConfigurationsManager:
         return """
             QToolBar{border: 1px solid transparent;
             background-color: """ + self.TOOLBAR_BACKGROUND_COLOR + """;
+            margin-top: 4px;
+            padding: -1px;
+            };
+            """
+
+
+    @property
+    def LEFT_TOOLBAR_STYLE(self):
+        # Same geometry as TOOLBAR_STYLE, but backed by the left-pane color so the
+        # upper-left button toolbar (nav arrows) blends into the left pane rather
+        # than the file-explorer toolbar area.
+        return """
+            QToolBar{border: 1px solid transparent;
+            background-color: """ + self.LEFT_PANE_BACKGROUND_COLOR + """;
             margin-top: 4px;
             padding: -1px;
             };

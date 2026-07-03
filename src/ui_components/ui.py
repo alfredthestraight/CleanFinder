@@ -15,7 +15,7 @@ from src.shared.vars import conf_manager as conf, logger as logger
 
 from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path, dir_
 from src.data_models import PandasModel
-from src.utils.utils import get_full_icon_path
+from src.utils.utils import get_full_icon_path, create_qaction_key_sequence
 from src.ui_components.file_explorer_table import FileExplorerTable
 
 class TextboxNavigator(CustomSizeQToolBar):
@@ -218,6 +218,12 @@ class ui(QtWidgets.QMainWindow):
         """
         logger.info("ui - init left column")
         self.left_column = QWidget()
+        # Paint the left column itself with the left-pane color so the 4px strip
+        # above the toolbar (exposed by the toolbar's margin-top) blends in rather
+        # than showing the default window background. Scoped by object name so it
+        # doesn't cascade onto child widgets.
+        self.left_column.setObjectName("leftColumn")
+        self.left_column.setStyleSheet(self._left_column_background_style())
         self.left_column_layout = QVBoxLayout(self.left_column)
         self.left_column_layout.setContentsMargins(0, 0, 0, 0)
         self.left_column_layout.setSpacing(0)
@@ -287,8 +293,10 @@ class ui(QtWidgets.QMainWindow):
 
 
 
-        shortcut = QShortcut(QKeySequence("Tab"), self)
-        shortcut.activated.connect(self.switch_table_focus)
+        # Pane-cycling (default Tab / Shift+Tab) is part of the configurable keymap and is
+        # registered on every FileExplorerTable via initialize_all_key_sequences. It must
+        # also fire when the favorites pane has focus, so bind it there too.
+        self.reload_favorites_pane_switch_shortcuts()
         # shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
         # shortcut2.activated.connect(self.expose_input_textbox)
         
@@ -359,17 +367,39 @@ class ui(QtWidgets.QMainWindow):
     def path(self):
         return self.file_explorer.path
 
-    def switch_table_focus(self):
+    def _cycle_pane_focus(self, direction: int):
+        # direction = 1: forward (favorites -> pane(s) -> favorites),
+        # direction = -1: backward. Cycles across the favorites pane and every table pane.
         targets = [self.favs_table_view] + self.all_tables()
         idx = 0
         for i, t in enumerate(targets):
             if t.hasFocus():
                 idx = i
                 break
-        nxt = targets[(idx + 1) % len(targets)]
+        nxt = targets[(idx + direction) % len(targets)]
         if nxt is not self.favs_table_view:
             self.favs_table_view.clearSelection()
         nxt.setFocus()
+
+    def switch_table_focus(self):
+        self._cycle_pane_focus(1)
+
+    def switch_table_focus_backwards(self):
+        self._cycle_pane_focus(-1)
+
+    def reload_favorites_pane_switch_shortcuts(self):
+        # Re-bind the pane-cycling shortcuts on the favorites pane from the current keymap.
+        # Tagged actions are cleared first so keymap reloads don't accumulate stale duplicates.
+        for act in list(self.favs_table_view.actions()):
+            if act.property("is_pane_switch_shortcut"):
+                self.favs_table_view.removeAction(act)
+        shortcuts = conf.get("keyboard_shortcuts")
+        cycling = {"SWITCH_PANE_FOCUS": self.switch_table_focus,
+                   "SWITCH_PANE_FOCUS_BACKWARDS": self.switch_table_focus_backwards}
+        for action_name, handler in cycling.items():
+            for key_sequence in shortcuts.get(action_name, []):
+                action = create_qaction_key_sequence(self.favs_table_view, key_sequence, handler)
+                action.setProperty("is_pane_switch_shortcut", True)
 
     def change_path(self, newpath: str, reset_path_history: bool = True):
         self.file_explorer.change_path(newpath, reset_path_history=reset_path_history)
@@ -391,20 +421,36 @@ class ui(QtWidgets.QMainWindow):
         return ("QSplitter::handle:horizontal{background-color: "
                 + conf.LEFT_PANE_SEPARATOR_COLOR + ";}")
 
+    def _left_column_background_style(self):
+        # Backs the left column widget with the left-pane color (object-name scoped
+        # so it doesn't cascade to children).
+        return ("QWidget#leftColumn{background-color: "
+                + conf.LEFT_PANE_BACKGROUND_COLOR + ";}")
+
     def generate_top_toolbar(self):
         self.toolbar = create_toolbar(parent=self.left_column)
+        # The left column's button toolbar belongs to the left pane, so back it
+        # with the left-pane color instead of the shared file-explorer toolbar color.
+        self.toolbar.setStyleSheet(conf.LEFT_TOOLBAR_STYLE)
         # Buttons (can appear stand-alone, in a menubar, etc...)
-        up_button = create_action(self, icon_path=get_full_icon_path(conf.UP_ICON_NAME),
-                                  when_triggered=self.go_to_parent_dir)
+        # up_button = create_action(self, icon_path=get_full_icon_path(conf.UP_ICON_NAME), when_triggered=self.go_to_parent_dir)
+        up_button = create_pushbutton(self, icon_path=get_full_icon_path(conf.UP_ICON_NAME), width=20, height=20, when_triggered=self.go_to_parent_dir)
         # Push-buttons
         back_pushbutton    = create_pushbutton(self, icon_path=get_full_icon_path(conf.BACKWARD_ICON_NAME), width=20, height=20, when_triggered=self.go_to_previous_path)
         self.down_button   = create_pushbutton(self, icon_path=get_full_icon_path(conf.DOWN_ICON_NAME), when_triggered=self.show_browsing_history)
         forward_pushbutton = create_pushbutton(self, icon_path=get_full_icon_path(conf.FORWARD_ICON_NAME), width=20, height=20, when_triggered=self.go_to_next_path)
 
+        # Leading spacer to nudge the nav buttons right (transparent, so the toolbar's
+        # left-pane background shows through). Tweak the width to change the offset.
+        left_spacer = QWidget()
+        left_spacer.setFixedWidth(5)
+        left_spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.toolbar.addWidget(left_spacer)
         self.toolbar.addWidget(back_pushbutton)
         self.toolbar.addWidget(forward_pushbutton)
         self.toolbar.addWidget(self.down_button)
-        self.toolbar.addAction(up_button)
+        # self.toolbar.addAction(up_button)
+        self.toolbar.addWidget(up_button)
 
 
     def _build_navigator(self, pane):
@@ -483,7 +529,12 @@ class ui(QtWidgets.QMainWindow):
                                                       "Path": [None],
                                                       "icon_full_path": [get_full_icon_path("_quick_access_")]},
                                                       row_height=conf.FAVORITES_ROW_HEIGHT + 12)
-            self.favs_table_view_header.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
+            # Nudge the icon + text right by a few pixels. spacer_column_indent works only
+            # in whole space-characters (too coarse), and setViewportMargins gets wiped by
+            # QTableView.updateGeometries -- so add left padding on the item itself, which
+            # shifts both the icon and the text and survives geometry recalcs.
+            self.favs_table_view_header.setStyleSheet(
+                conf.FAVORITES_TABLE_STYLE + "QTableView::item { padding-left: 6px; }")
             self.favs_table_view_header.setFixedHeight(int(round(self.favs_table_view_header.rowHeight(0), 0)))
             self.favs_table_view_header.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
 
@@ -520,6 +571,7 @@ class ui(QtWidgets.QMainWindow):
     def reload_keyboard_shortcuts(self):
         for t in self.all_tables():
             t.initialize_all_key_sequences()
+        self.reload_favorites_pane_switch_shortcuts()
 
     def dragEnterEvent(self, event):
         # Accept the drag if the event contains text
@@ -619,6 +671,8 @@ class ui(QtWidgets.QMainWindow):
                         try:
                             self.pane.table.change_path(self.pane.textbox.text())
                             self.encompassing_ui.hide_input_textbox(self.pane)
+                            # Return focus to this pane's table so arrow / Tab keys respond
+                            self.pane.table.setFocus()
                         except:
                             pass
             elif event.type() == QtCore.QEvent.Type.FocusOut:
@@ -690,9 +744,12 @@ class ui(QtWidgets.QMainWindow):
     def refresh_all_configurations(self):
         logger.info("ui.refresh_all_configurations")
         if conf.SHOW_FAVORITES_TITLE:
-            self.favs_table_view_header.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
+            # Keep the left-padding nudge on the item (see generate_favorites_area).
+            self.favs_table_view_header.setStyleSheet(
+                conf.FAVORITES_TABLE_STYLE + "QTableView::item { padding-left: 3px; }")
         self.favs_table_view.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
-        self.toolbar.setStyleSheet(conf.TOOLBAR_STYLE)
+        self.toolbar.setStyleSheet(conf.LEFT_TOOLBAR_STYLE)
+        self.left_column.setStyleSheet(self._left_column_background_style())
         self.subsplitter.setStyleSheet(self._left_pane_separator_style())
         self.tree.setStyleSheet(conf.TREE_STYLE)
         for pane in self.panes:

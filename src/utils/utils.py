@@ -128,6 +128,7 @@ def create_qaction_key_sequence(obj, key_sequence: str, when_triggered: Callable
     newTableAction.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
     newTableAction.triggered.connect(when_triggered)
     obj.addAction(newTableAction)
+    return newTableAction
 
 
 def map_key_to_new_row_num(key_id: int, caller_widget) -> int:

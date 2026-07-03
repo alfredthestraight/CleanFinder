@@ -73,6 +73,16 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         self.customContextMenuRequested.connect(self.contextMenuEvent)
         self.index_right_clicked_on = None
 
+    def moveCursor(self, cursorAction, modifiers):
+        # Keep arrow-key navigation on the column that holds the visible item text
+        # (e.g. "Desktop", "Downloads"), so selection never lands on the empty spacer
+        # column or any hidden column.
+        index = super().moveCursor(cursorAction, modifiers)
+        name_col = self.table.FAVORITES_FILENAME_COLUMN_INDEX
+        if index.isValid() and index.column() != name_col:
+            index = index.siblingAtColumn(name_col)
+        return index
+
     def dragMoveEvent(self, e):
         e.accept()
 
