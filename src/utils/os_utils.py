@@ -764,6 +764,44 @@ def open_path_in_terminal(item_path: str):
     subprocess.run(["osascript", "-e", applescript], check=True)
 
 
+def show_in_finder(item_path: str, selected_item_paths: list[str] = None):
+    """
+    Opens macOS Finder at the specified path.
+    If the path is a file, its containing directory is opened.
+    If selected_item_paths is given, those items are revealed and selected in Finder.
+    """
+    abs_path = os.path.abspath(os.path.expanduser(item_path))
+
+    if os.path.isfile(abs_path):
+        target_dir = os.path.dirname(abs_path)
+    elif os.path.isdir(abs_path):
+        target_dir = abs_path
+    else:
+        raise FileNotFoundError(f"The path '{item_path}' does not exist.")
+
+    # Only keep items that actually exist on disk.
+    item_paths = [os.path.abspath(os.path.expanduser(p)) for p in (selected_item_paths or [])]
+    item_paths = [p for p in item_paths if os.path.exists(p)]
+
+    if not item_paths:
+        subprocess.run(["open", target_dir], check=True)
+        return
+
+    # Reveal (and thereby select) the items in Finder via AppleScript. Escape
+    # backslashes and quotes so paths with special characters stay valid strings.
+    def _escape(p: str) -> str:
+        return p.replace("\\", "\\\\").replace('"', '\\"')
+
+    file_refs = ", ".join(f'(POSIX file "{_escape(p)}")' for p in item_paths)
+    applescript = f'''
+    tell application "Finder"
+        activate
+        reveal {{{file_refs}}}
+    end tell
+    '''
+    subprocess.run(["osascript", "-e", applescript], check=True)
+
+
 def open_application(app_path: str) -> int:
     """
     Opens an application from the /Applications folder on macOS.

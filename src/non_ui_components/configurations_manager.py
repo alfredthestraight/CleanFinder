@@ -470,6 +470,9 @@ class ConfigurationsManager:
                 ],
                 "CLOSE_WINDOW": [
                       "Ctrl+W"
+                ],
+                "SHOW_IN_FINDER": [
+                      "Ctrl+O"
                 ]
             },
             "sorting": {

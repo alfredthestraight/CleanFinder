@@ -37,7 +37,8 @@ def map_shortcut_name_to_func(file_explorer_obj, action_name: str):
         "OPEN_CONTEXT_MENU": file_explorer_obj.trigger_context_menu,
         "SWITCH_PANE_FOCUS": file_explorer_obj.encompassing_ui.switch_table_focus,
         "SWITCH_PANE_FOCUS_BACKWARDS": file_explorer_obj.encompassing_ui.switch_table_focus_backwards,
-        "CLOSE_WINDOW": file_explorer_obj.encompassing_ui.close
+        "CLOSE_WINDOW": file_explorer_obj.encompassing_ui.close,
+        "SHOW_IN_FINDER": file_explorer_obj.show_in_finder
     }[action_name]
 
 

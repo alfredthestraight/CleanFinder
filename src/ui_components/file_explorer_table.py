@@ -21,7 +21,7 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 rename_file_or_dir, run_file_in_terminal, beautify_bytes_size,
                                 is_dir, is_path_an_app, get_all_items_in_path, parent_directory,
                                 extract_extension_from_path, extract_filename_from_path, is_root,
-                                save_app_icon_in_app_icons_dir, open_path_in_terminal, dir_,
+                                save_app_icon_in_app_icons_dir, open_path_in_terminal, show_in_finder, dir_,
                                 create_file, increment_max_item_name, get_all_item_names_in_directory,
                                 get_type_as_icon_string, get_file_type, size_bytes_to_string)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
@@ -542,6 +542,10 @@ class FileExplorerTable(QTableView):
 
     def open_path_in_terminal(self):
         open_path_in_terminal(self.path)
+
+    def show_in_finder(self):
+        selected_item_paths = [os.path.join(self.path, name) for name in self.currently_selected_filenames]
+        show_in_finder(self.path, selected_item_paths)
     
     """
     Items name manipulation

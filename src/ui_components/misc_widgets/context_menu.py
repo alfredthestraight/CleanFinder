@@ -86,6 +86,8 @@ class ContextMenuDelegate:
                      )},
                 {"menu_item_name": "Open path in terminal",
                  "associated_method": self.file_exp_obj.open_path_in_terminal},
+                {"menu_item_name": "Show in Finder",
+                 "associated_method": self.file_exp_obj.show_in_finder},
                 ]
 
     @property
@@ -186,6 +188,8 @@ class ContextMenuDelegate:
                 terminal_path = item_full_path if os.path.isdir(item_full_path) else self.file_exp_obj.path
                 actions_list.append({"menu_item_name": "Open path in terminal",
                                      "associated_method": lambda: open_path_in_terminal(terminal_path)})
+            actions_list.append({"menu_item_name": "Show in Finder",
+                                 "associated_method": self.file_exp_obj.show_in_finder})
             actions_list.append({"menu_item_name": "Properties",
                                  "associated_method": self.file_exp_obj.open_properties})
             self.append_to_context_menu(menu, actions_list)
