@@ -4,7 +4,8 @@ import shutil
 import pandas as pd
 
 from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel, QFileDialog, \
-    QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, QDialogButtonBox
+    QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, QDialogButtonBox, \
+    QScrollArea, QFrame
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QIcon, QAction, QFontDatabase
@@ -221,9 +222,16 @@ class MebuBarManager(QMainWindow):
                                  "add keyboard shortcuts, or drag & drop displayed shortcuts "
                                  "between actions")
         user_explanation.setStyleSheet("QLabel{background-color: transparent; padding: 5 5 5 5;}")
+        # Keep the shortcuts list a bounded height and scroll through the rest, so the
+        # window opens short instead of as tall as all ~26 action rows combined.
+        self.shortcuts_scroll_area = QScrollArea()
+        self.shortcuts_scroll_area.setWidgetResizable(True)
+        self.shortcuts_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.shortcuts_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.shortcuts_scroll_area.setWidget(self.shortcuts_selection_widget)
+
         self.overall_layout.addWidget(user_explanation)
-        self.overall_layout.addWidget(self.shortcuts_selection_widget)
-        self.overall_layout.addStretch(1)
+        self.overall_layout.addWidget(self.shortcuts_scroll_area, 1)
         self.overall_layout.addWidget(self.dialog)
         self.main_widget = QWidget()
         self.main_widget.setLayout(self.overall_layout)
@@ -231,7 +239,7 @@ class MebuBarManager(QMainWindow):
         self.keymap_window = QMainWindow()
         self._keymap_window_install_event_filter = CloseOnEscapeEventFilter(self.keymap_window)
         self.keymap_window.installEventFilter(self._keymap_window_install_event_filter)
-        self.keymap_window.resize(800, 700)
+        self.keymap_window.resize(800, 560)
         self.keymap_window.setCentralWidget(self.main_widget)
         self.keymap_window.setWindowTitle("Keyboard shortcuts")
         self.keymap_window.show()
