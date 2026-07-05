@@ -306,11 +306,11 @@ class ConfigurationsManager:
                 "TEXT_FONT": "Helvetica",
                 "font_sizes": {
                     "BOTTOM_TEXT_FONT_SIZE": 12,
-                    "TEXT_FONT_SIZE": 14,
+                    "TEXT_FONT_SIZE": 13,
                     "HEADER_TEXT_FONT_SIZE": 13,
                     "TEXTBOX_FONT_SIZE": 13,
                     "FAVORITES_FONT_SIZE": 13,
-                    "TREE_FONT_SIZE": 14,
+                    "TREE_FONT_SIZE": 13,
                 },
                 "font_weights": {
                     "TEXT_FONT_WEIGHT": 400,

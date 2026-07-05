@@ -1,15 +1,18 @@
+import os
+import shutil
+
 import pandas as pd
 
 from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel, QFileDialog, \
     QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, QDialogButtonBox
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QFontDatabase
 
 from src.data_models import SimplePandasModel2
 from src.shared.vars import conf_manager as conf
 from src.utils.utils import get_full_icon_path, is_legal_key_sequence
-from src.utils.os_utils import extract_extension_from_path, extract_filename_from_path
+from src.utils.os_utils import extract_extension_from_path
 from src.ui_components.misc_widgets.shortcut_keys_configuration import KeyboardShortcutSelectorUi
 from src.ui_components.misc_widgets.dialogs_and_messages import CustomQDialogButtonBox, \
     QDialogButtonsAndWidgets
@@ -76,13 +79,42 @@ class font_picker:
 
     def __call__(self):
         file_dialog = QFileDialog()
-        folder, _ = file_dialog.getOpenFileName(dir='/System/Library/Fonts/Supplemental')
-        if folder:
-            ext = extract_extension_from_path(folder)
-            if ext.lower() in ['ttf', 'ttc']:
-                font_name = extract_filename_from_path(folder).replace('.' + ext, '')
-                self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
-                                                font_name, Qt.ItemDataRole.EditRole)
+        path, _ = file_dialog.getOpenFileName(dir='/System/Library/Fonts/Supplemental')
+        if not path:
+            return
+        if extract_extension_from_path(path).lower() not in ['ttf', 'ttc', 'otf']:
+            return
+
+        # Read the font's real family name (and, if new, make it usable this session).
+        existing_families = set(QFontDatabase.families())
+        font_id = QFontDatabase.addApplicationFont(path)
+        if font_id == -1:
+            return  # unreadable / not a valid font file
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if not families:
+            return
+        family = families[0]
+
+        already_installed = family in existing_families
+        if not already_installed:
+            # Ask consent, then install to ~/Library/Fonts so it's a permanent system font.
+            msg_box = CustomQDialogButtonBox(
+                "Install font",
+                f"'{family}' isn't installed on your Mac.\n\n"
+                f"Install it to your user Fonts folder so you can use it? "
+                f"It will be available immediately.")
+            if msg_box.exec() != 1:          # user declined -> keep current font
+                QFontDatabase.removeApplicationFont(font_id)
+                return
+            fonts_dir = os.path.expanduser("~/Library/Fonts")
+            os.makedirs(fonts_dir, exist_ok=True)
+            dest = os.path.join(fonts_dir, os.path.basename(path))
+            if not os.path.exists(dest):
+                shutil.copy2(path, dest)
+            # font_id (from `path`) stays registered -> usable in this session already.
+
+        self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
+                                        family, Qt.ItemDataRole.EditRole)
 
 
 # Create the menu bar
