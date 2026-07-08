@@ -3,15 +3,15 @@
       "FILE_EXPLORER_ALTERNATING_ROW_COLORS": "N",
       "FILE_EXPLORER_SHOW_ROW_NUMBERS": "N",
       "FOLDERS_ALWAYS_ABOVE_FILES": "Y",
-      "SHOW_HIDDEN_ITEMS": "N",
-      "DUAL_PANE_MODE": "Y",
+      "SHOW_HIDDEN_ITEMS": "Y",
+      "DUAL_PANE_MODE": "N",
       "scrollbar": {
             "SCROLLBAR_COLOR": "rgb(200, 207, 210)",
             "SCROLLBAR_BACKGROUND_COLOR": "rgb(250, 250, 250)",
             "SCROLLBAR_THICKNESS": 10
       },
       "fonts": {
-            "TEXT_FONT": "Helvetica",
+            "TEXT_FONT": "SF Pro",
             "font_sizes": {
                   "BOTTOM_TEXT_FONT_SIZE": 12,
                   "TEXT_FONT_SIZE": 13,
@@ -21,7 +21,7 @@
                   "TREE_FONT_SIZE": 13
             },
             "font_weights": {
-                  "TEXT_FONT_WEIGHT": 100,
+                  "TEXT_FONT_WEIGHT": 400,
                   "HEADER_TEXT_FONT_WEIGHT": 400,
                   "FAVORITES_FONT_WEIGHT": 400,
                   "TREE_FONT_WEIGHT": 400
@@ -36,7 +36,7 @@
                   "BOTTOM_STRIP_TEXT_COLOR": "rgb(100, 100, 100)"
             },
             "font_row_heights": {
-                  "FILE_EXPLORER_ROW_HEIGHT": 22,
+                  "FILE_EXPLORER_ROW_HEIGHT": 24,
                   "FAVORITES_ROW_HEIGHT": 28,
                   "TREE_ROW_HEIGHT": 25
             }
@@ -50,7 +50,7 @@
             "FILE_EXPLORER_ROW_HOVER_COLOR": "rgb(240, 240, 240)",
             "FILE_EXPLORER_DRAGGED_ROW_HOVER_COLOR": "rgb(140, 200, 240)",
             "LEFT_PANE_BACKGROUND_COLOR": "rgb(255, 255, 255)",
-            "LEFT_PANE_SEPARATOR_COLOR": "rgb(255, 87, 69)",
+            "LEFT_PANE_SEPARATOR_COLOR": "rgb(200, 200, 200)",
             "FILE_EXPLORER_HEADER_COLOR": "rgb(255, 255, 255)",
             "FILE_EXPLORER_BACKGROUND_COLOR": "rgb(255, 255, 255)",
             "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR": "rgb(255, 255, 255)",
@@ -76,20 +76,26 @@
             "Name": [
                   "Desktop",
                   "Downloads",
-                  "Documents",
-                  "Onboarding"
+                  "Onboarding",
+                  "dev",
+                  "Tech",
+                  "Personal"
             ],
             "Path": [
                   "/Users/roi.granot/Desktop",
                   "/Users/roi.granot/Downloads",
-                  "/Users/roi.granot/Documents",
-                  "/Users/roi.granot/Desktop/Onboarding"
+                  "/Users/roi.granot/Desktop/Onboarding",
+                  "/Users/roi.granot/dev",
+                  "/Volumes/Tech",
+                  "/Users/roi.granot/Personal"
             ],
             "icon_full_path": [
-                  "/Users/roi.granot/Personal/CleanFinder/results/icons/_desktop_.png",
-                  "/Users/roi.granot/Personal/CleanFinder/results/icons/_downloads_.png",
-                  "/Users/roi.granot/Personal/CleanFinder/results/icons/_document_.png",
-                  "/Users/roi.granot/Personal/CleanFinder/results/icons/_folder_.png"
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/_desktop_.png",
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/_downloads_.png",
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/favorites_Onboarding.png",
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/favorites_dev.png",
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/favorites_Tech.png",
+                  "/Applications/CleanFinder.app/Contents/Frameworks/results/icons/favorites_Personal.png"
             ]
       },
       "NEW_FOLDER_NAME_TEMPLATE": "New Folder",
@@ -172,6 +178,19 @@
             ],
             "OPEN_CONTEXT_MENU": [
                   "Meta+Space"
+            ],
+            "SWITCH_PANE_FOCUS": [
+                  "Tab"
+            ],
+            "SWITCH_PANE_FOCUS_BACKWARDS": [
+                  "Shift+Tab"
+            ],
+            "CLOSE_WINDOW": [
+                  "Ctrl+W"
+            ],
+            "SHOW_IN_FINDER": [
+                  "Ctrl+O",
+                  "Alt+O"
             ]
       },
       "sorting": {
@@ -190,13 +209,13 @@
       },
       "FILE_EXPLORER_GRID_THICKNESS": 1,
       "WINDOW_WIDTH": 798,
-      "WINDOW_HEIGHT": 666,
+      "WINDOW_HEIGHT": 670,
       "TOP_TOOLBAR_HEIGHT": 200,
       "BOTTOM_TOOLBAR_HEIGHT": 24,
-      "FILE_EXPLORER_WIDTH": 519,
-      "LEFT_PANE_WIDTH": 151,
-      "FILE_EXPLORER_COL_WIDTH_1": 273,
+      "FILE_EXPLORER_WIDTH": 597,
+      "LEFT_PANE_WIDTH": 162,
+      "FILE_EXPLORER_COL_WIDTH_1": 215,
       "FILE_EXPLORER_COL_WIDTH_2": 174,
       "FILE_EXPLORER_COL_WIDTH_3": 90,
-      "FILE_EXPLORER_COL_WIDTH_4": 46
+      "FILE_EXPLORER_COL_WIDTH_4": 98
 }

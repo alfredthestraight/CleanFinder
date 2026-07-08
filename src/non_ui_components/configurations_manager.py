@@ -328,7 +328,7 @@ class ConfigurationsManager:
                     "BOTTOM_STRIP_TEXT_COLOR": "rgb(100, 100, 100)"
                 },
                 "font_row_heights": {
-                    "FILE_EXPLORER_ROW_HEIGHT": 22,
+                    "FILE_EXPLORER_ROW_HEIGHT": 23,
                     "FAVORITES_ROW_HEIGHT": 28,
                     "TREE_ROW_HEIGHT": 25
                 }
