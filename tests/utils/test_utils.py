@@ -4,9 +4,58 @@ import os
 os.chdir(os.getcwd().replace('/tests/utils', ''))
 
 from src.utils import os_utils
+from src.utils import utils
 import pandas as pd
 from pathlib import Path
 
+
+class TestTypeAheadBuffer(unittest.TestCase):
+
+    def test_appends_within_timeout(self):
+        self.assertEqual(
+            utils.update_type_ahead_buffer('r', 'e', elapsed_seconds=0.2, timeout=0.7),
+            're')
+
+    def test_resets_after_timeout(self):
+        self.assertEqual(
+            utils.update_type_ahead_buffer('r', 'e', elapsed_seconds=1.5, timeout=0.7),
+            'e')
+
+    def test_empty_previous_buffer_starts_fresh(self):
+        self.assertEqual(
+            utils.update_type_ahead_buffer('', 'r', elapsed_seconds=0.1, timeout=0.7),
+            'r')
+
+
+class TestComputeTypeAheadTarget(unittest.TestCase):
+
+    def setUp(self):
+        self.names = ['report.txt', 'resume.pdf', 'essay.doc', 'Run.sh', 'zebra.png']
+
+    def test_prefix_match_returns_first_match_from_top(self):
+        # 're' is not a repeated single letter -> prefix mode, first match wins
+        self.assertEqual(utils.compute_type_ahead_target(self.names, 're', current_row=3), 0)
+
+    def test_is_case_insensitive(self):
+        self.assertEqual(utils.compute_type_ahead_target(self.names, 'run', current_row=None), 3)
+
+    def test_single_letter_cycles_to_next_match_after_current(self):
+        # current on row 0 (report), pressing 'r' should advance to resume (row 1)
+        self.assertEqual(utils.compute_type_ahead_target(self.names, 'r', current_row=0), 1)
+
+    def test_repeated_letter_keeps_cycling(self):
+        # 'rr' is a repeated single letter -> still cycle mode from current
+        self.assertEqual(utils.compute_type_ahead_target(self.names, 'rr', current_row=1), 3)
+
+    def test_cycle_wraps_around(self):
+        # current on last r-match (Run, row 3), pressing 'r' wraps back to report (row 0)
+        self.assertEqual(utils.compute_type_ahead_target(self.names, 'r', current_row=3), 0)
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(utils.compute_type_ahead_target(self.names, 'q', current_row=None))
+
+    def test_empty_names_returns_none(self):
+        self.assertIsNone(utils.compute_type_ahead_target([], 'r', current_row=None))
 
 
 class TestOsUtils(unittest.TestCase):

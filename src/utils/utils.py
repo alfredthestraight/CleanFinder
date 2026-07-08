@@ -15,6 +15,47 @@ def flatten_list_of_lists(lst):
     return list(itertools.chain(*lst))
 
 
+TYPE_AHEAD_TIMEOUT_SECONDS = 0.7
+
+
+def update_type_ahead_buffer(prev_buffer: str, char: str,
+                             elapsed_seconds: float,
+                             timeout: float = TYPE_AHEAD_TIMEOUT_SECONDS) -> str:
+    """Append `char` to the type-ahead search buffer, or start a fresh buffer if
+    more than `timeout` seconds elapsed since the last keystroke."""
+    if elapsed_seconds > timeout:
+        return char
+    return prev_buffer + char
+
+
+def compute_type_ahead_target(filenames: list, buffer: str, current_row) -> Union[int, None]:
+    """Return the row index the type-ahead search should jump to, or None if there's
+    no match.
+
+    - A buffer made of a single repeated character (``'r'``, ``'rr'``) cycles to the
+      next filename starting with that letter, after `current_row` and wrapping around.
+    - Any other buffer (``'re'``) is a case-insensitive prefix match returning the
+      first matching row from the top.
+    """
+    if not buffer or not filenames:
+        return None
+    lowered = [str(name).lower() for name in filenames]
+    buf = buffer.lower()
+    n = len(lowered)
+    if len(set(buf)) == 1:  # same letter repeated -> cycle mode
+        letter = buf[0]
+        start = (current_row + 1) if current_row is not None else 0
+        for offset in range(n):
+            idx = (start + offset) % n
+            if lowered[idx].startswith(letter):
+                return idx
+        return None
+    for idx in range(n):  # multi-character prefix -> first match from top
+        if lowered[idx].startswith(buf):
+            return idx
+    return None
+
+
 def traverse_dict_as_tree(d: dict, prefix: str = None):
     dict_items = []
     for k in d.keys():

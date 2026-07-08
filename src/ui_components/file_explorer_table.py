@@ -25,7 +25,8 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 create_file, increment_max_item_name, get_all_item_names_in_directory,
                                 get_type_as_icon_string, get_file_type, size_bytes_to_string)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
-    map_key_to_new_row_num, create_qaction_key_sequence
+    map_key_to_new_row_num, create_qaction_key_sequence, \
+    update_type_ahead_buffer, compute_type_ahead_target
 from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceTextInSelectedItems,\
     next_new_dir_name, paths_history, ItemsZipper, map_shortcut_name_to_func, RowSelectionExtender,\
      PrefixSuffixChangeInSelectedItems, validate_name_change_is_approved
@@ -65,6 +66,8 @@ class FileExplorerTable(QTableView):
         self.last_selected_index = None
 
         self.last_selection_change_time = 0.0
+        self._type_ahead_buffer = ''
+        self._type_ahead_last_keystroke = 0.0
         self.encompassing_ui = encompassing_ui
         self.browsing_history_manager = paths_history(root_dir_path.lstrip())
         self.row_selection_extender = RowSelectionExtender(self)  # When user presses Shift+Up/Down
@@ -1073,6 +1076,36 @@ class FileExplorerTable(QTableView):
                     self.on_enter()
             elif e.key() == QtCore.Qt.Key.Key_Escape:    # Enter
                 self.on_escape()
+            else:
+                self._type_ahead_search(e)
+
+    def _type_ahead_search(self, e):
+        """Windows-style type-to-navigate: printable keystrokes accumulate into a
+        buffer (reset after a short pause) and jump to the first matching filename."""
+        # Ctrl/Cmd/Alt combos are keyboard shortcuts, not type-ahead input.
+        disallowed = (QtCore.Qt.KeyboardModifier.ControlModifier
+                      | QtCore.Qt.KeyboardModifier.MetaModifier
+                      | QtCore.Qt.KeyboardModifier.AltModifier)
+        if e.modifiers() & disallowed:
+            return
+        char = e.text()
+        if not char or not char.isprintable() or char.isspace():
+            return
+
+        now = time.monotonic()
+        self._type_ahead_buffer = update_type_ahead_buffer(
+            self._type_ahead_buffer, char, now - self._type_ahead_last_keystroke)
+        self._type_ahead_last_keystroke = now
+
+        filenames = self.model()._data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
+        selected = self.selectedIndexes()
+        current_row = selected[0].row() if len(selected) > 0 else None
+        target_row = compute_type_ahead_target(
+            filenames, self._type_ahead_buffer, current_row)
+        if target_row is not None:
+            self.keep_selection_as_prev(selected)
+            self.selectRow(target_row)
+            self.scrollTo(self.model().index(target_row, 0))
 
 
     """
