@@ -97,11 +97,17 @@ class SearchWindow_threaded(QDialog):
         self.results_table = QTableView()
         self.results_table.setItemDelegate(NoElideDelegate())
         self.results_table.setStyleSheet("""QTableView{border: 0px;  margin: 0px;}""")
-        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.results_table.horizontalHeader().setVisible(False)
+        # Interactive (not Stretch) so the user can drag the column boundary in the
+        # header to resize it; the header must be visible for the drag handle to exist.
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.results_table.horizontalHeader().setVisible(True)
+        # Let a widened column scroll horizontally so long paths can be read in full.
+        self.results_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.model = SimplePandasModel(data=pd.DataFrame(columns=['Filename']))
         self.results_table.setModel(self.model)
+        # Start the single column filling the window; the user can drag it wider/narrower.
+        self.results_table.setColumnWidth(0, 470)
         self.results_table.doubleClicked.connect(self.double_click_on_search_result)
         self.results_table.verticalScrollBar().valueChanged.connect(self.scrollbar_reached_bottom)
         self.results_layout.addWidget(self.results_table)
