@@ -274,6 +274,25 @@ class UiWindowManager(QMainWindow):
         self.timer.timeout.connect(self.when_timer_finishes)
         self.timer.start(1)
 
+        return new_ui
+
+    def open_service_target(self, folder_path: str, filename_to_highlight: str = None):
+        """Open a new window at ``folder_path`` and optionally highlight a file.
+
+        Used by the "Open in CleanFinder" macOS Service. The highlight is
+        best-effort: it is scheduled after the table's async load, and any
+        failure there still leaves the window open at ``folder_path``.
+        """
+        new_ui = self.create_new_window(root_dir_path=folder_path)
+        if filename_to_highlight:
+            try:
+                new_ui.file_explorer.delayed_select_rows_where_items_texts_are(
+                    [filename_to_highlight])
+            except Exception as e:
+                logger.error(f"open_service_target: failed to highlight "
+                             f"'{filename_to_highlight}' in '{folder_path}': {e}")
+        return new_ui
+
     def when_timer_finishes(self):
         self.timer.stop()
         new_ui = self.windows[len(self.windows)-1]
