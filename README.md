@@ -23,3 +23,41 @@ Currently supports Sonoma, and (though a bit buggy) Sequoia
 * Sometimes pip3 install / pip3 install -U worked and pip didn't (e.g., **pip3 install -U pyobjc**)
 * If everything fails, you can use **python setup.py py2app -A**. The -A flag will create an alias to the source code, making it behave as if it's a standalone app, but it's not really. It's more like a shortcut to the python code without needing to run the python command in the terminal. 
 * Wrapping the entire project after transforming the py scripts into Nuitka code doesn't work. An alternative is to compile individual files using command **nuitka --module filename.py**, and just run the project (e.g., in pycharm) with the created files instead of the original .py file
+
+pyinstaller --noconfirm --windowed \
+    --name="CleanFinder" \
+    --icon="resources/black_binder.icns" \
+    --add-data "resources:resources" \
+    CleanFinder.py
+
+
+# Building the app (future rebuilds — use this)
+
+The command above is the **one-time** command that generated `CleanFinder.spec`. For
+every rebuild after that, build **from the spec** — the spec holds the icon,
+bundled resources, the `com.cleanfinder.app` bundle identifier, and the
+`NSServices` ("Open in CleanFinder") declaration. Do **not** re-pass `--icon` /
+`--add-data`: PyInstaller ignores build options when given a `.spec`, and passing
+them as bare arguments breaks the build.
+
+Run these as **separate** commands (no backslash chaining):
+
+**pyinstaller --noconfirm CleanFinder.spec**
+
+Then, to install it and register the "Open in CleanFinder" macOS Service (right-click
+a file/folder in Finder → Services):
+
+**cp -R dist/CleanFinder.app /Applications/**
+
+**xattr -cr /Applications/CleanFinder.app && codesign --force --deep --sign - /Applications/CleanFinder.app**
+
+**/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f /Applications/CleanFinder.app**
+
+**/System/Library/CoreServices/pbs -flush && open /Applications/CleanFinder.app && killall Finder**
+
+Notes:
+* The Service only appears for the app registered with Launch Services (the built
+  `.app`), not when running `python CleanFinder.py`.
+* Keep a single `CleanFinder.app` around. Multiple copies sharing one bundle
+  identifier make Launch Services resolve the Service to the wrong bundle and it
+  stops appearing.

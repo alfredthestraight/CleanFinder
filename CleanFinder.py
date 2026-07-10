@@ -32,9 +32,11 @@ from PySide6 import QtWidgets
 
 from src.non_ui_components.servers import ThreadsUiServer
 from src.non_ui_components.uis_manager import UiWindowManager
+from src.non_ui_components.macos_services import register_open_in_cleanfinder_service
 from src.ui_components.misc_widgets.menu_bar import populate_menubar_and_connect_triggers
 from src.shared.vars import conf_manager as conf, threads_server, logger as logger
 from src.installation import InstallationUiWidget
+from src.profiling import start_profiling, stop_profiling
 
 
 def enforce_should_reset_file_exists(should_reset_file_path: str):
@@ -56,8 +58,13 @@ def start_app():
     ui_manager = UiWindowManager()
     logger.info("Starting app - ThreadsUiServer()")
     threads_server['s1'] = ThreadsUiServer(ui_manager)
+    logger.info("Starting app - register 'Open in CleanFinder' Service")
+    # Kept in threads_server so the provider isn't garbage-collected while registered.
+    threads_server['open_in_cleanfinder_service'] = \
+        register_open_in_cleanfinder_service(ui_manager)
     logger.info("Starting app - create_new_window")
     ui_manager.create_new_window(root_dir_path=conf.DEFAULT_PATH)
+    logger.info(f"os.getcwd() = {os.getcwd()}")
     # Did not work on Sequoia 15.3 (functionality moved to the UI objects):
     # menubar = MebuBarManager(ui_manager)  # Takes care of menu bar requests
     # populate_menubar_and_connect_triggers(menubar)
@@ -66,6 +73,7 @@ def start_app():
 def main():
 
     # enforce_directories_and_files_exist()
+    # profiler_handle = start_profiling()
     app = QtWidgets.QApplication(sys.argv)
     app.setStartDragTime(1)
     should_reset_file_path = os.path.join(os.getcwd(), 'should_reset.txt')
@@ -84,7 +92,9 @@ def main():
     # Post installation
     else:
         start_app()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # stop_profiling(profiler_handle, os.path.join(os.getcwd(), 'results'))
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':

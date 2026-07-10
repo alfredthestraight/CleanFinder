@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>CleanFinder.bin</string>
+	<key>CFBundleExecutable</key>
+	<string>CleanFinder.bin</string>
+	<key>CFBundleIconFile</key>
+	<string>black_binder.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.cleanfinder.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>CleanFinder.bin</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Open in CleanFinder</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openInCleanFinder</string>
+			<key>NSPortName</key>
+			<string>CleanFinder</string>
+			<!-- NSSendFileTypes (UTI-based) is what surfaces the service in Finder's
+			     file/folder context menu. public.item matches any file or folder. -->
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<!-- NSSendTypes (pasteboard-type based) covers apps that place file URLs
+			     on the services pasteboard. -->
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.file-url</string>
+				<string>NSFilenamesPboardType</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
