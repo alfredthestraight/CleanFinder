@@ -47,7 +47,7 @@ app = BUNDLE(
     coll,
     name='CleanFinder.app',
     icon='resources/black_binder.icns',
-    bundle_identifier=None,
+    bundle_identifier='com.cleanfinder.app',
     info_plist={
         # "Open in CleanFinder" macOS Service. Handled at runtime by
         # src/non_ui_components/macos_services.py (NSMessage 'openInCleanFinder').
@@ -56,6 +56,11 @@ app = BUNDLE(
                 'NSMenuItem': {'default': 'Open in CleanFinder'},
                 'NSMessage': 'openInCleanFinder',
                 'NSPortName': 'CleanFinder',
+                # NSSendFileTypes (UTI-based) is what surfaces the service in
+                # Finder's file/folder context menu; public.item matches any
+                # file or folder. NSSendTypes covers apps that put file URLs on
+                # the services pasteboard.
+                'NSSendFileTypes': ['public.item'],
                 'NSSendTypes': ['public.file-url', 'NSFilenamesPboardType'],
             }
         ],

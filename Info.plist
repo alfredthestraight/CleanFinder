@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>black_binder.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>CleanFinder.bin</string>
+	<string>com.cleanfinder.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -32,6 +32,14 @@
 			<string>openInCleanFinder</string>
 			<key>NSPortName</key>
 			<string>CleanFinder</string>
+			<!-- NSSendFileTypes (UTI-based) is what surfaces the service in Finder's
+			     file/folder context menu. public.item matches any file or folder. -->
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<!-- NSSendTypes (pasteboard-type based) covers apps that place file URLs
+			     on the services pasteboard. -->
 			<key>NSSendTypes</key>
 			<array>
 				<string>public.file-url</string>
