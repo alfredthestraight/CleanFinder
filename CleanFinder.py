@@ -73,7 +73,7 @@ def start_app():
 def main():
 
     # enforce_directories_and_files_exist()
-    profiler_handle = start_profiling()
+    # profiler_handle = start_profiling()
     app = QtWidgets.QApplication(sys.argv)
     app.setStartDragTime(1)
     should_reset_file_path = os.path.join(os.getcwd(), 'should_reset.txt')
@@ -93,7 +93,7 @@ def main():
     else:
         start_app()
     exit_code = app.exec()
-    stop_profiling(profiler_handle, os.path.join(os.getcwd(), 'results'))
+    # stop_profiling(profiler_handle, os.path.join(os.getcwd(), 'results'))
     sys.exit(exit_code)
 
 
