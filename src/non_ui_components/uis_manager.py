@@ -283,6 +283,8 @@ class UiWindowManager(QMainWindow):
         best-effort: it is scheduled after the table's async load, and any
         failure there still leaves the window open at ``folder_path``.
         """
+        logger.info(f"open_service_target: opening '{folder_path}' "
+                    f"(highlight={filename_to_highlight})")
         new_ui = self.create_new_window(root_dir_path=folder_path)
         if filename_to_highlight:
             try:

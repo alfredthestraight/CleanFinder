@@ -61,3 +61,16 @@ Notes:
 * Keep a single `CleanFinder.app` around. Multiple copies sharing one bundle
   identifier make Launch Services resolve the Service to the wrong bundle and it
   stops appearing.
+
+
+# Opening a path from the terminal
+
+Once the built app is installed (see above), open any path in CleanFinder from the
+terminal:
+
+**open -a CleanFinder /some/path**
+
+A folder opens in a new window; a file opens its parent folder with the file
+highlighted. (Same mechanism as Finder's "Open With" and dragging a folder onto the
+dock icon — all handled via `QFileOpenEvent`.) As with the Service, this works with
+the built `.app`, not `python CleanFinder.py`.

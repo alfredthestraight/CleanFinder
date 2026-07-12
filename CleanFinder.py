@@ -28,11 +28,12 @@ if not os.path.exists(os.path.join(os.getcwd(), 'results', 'log.log')):
     open(os.path.join(os.getcwd(), 'results', 'log.log'), 'a').close()
 
 import sys
-from PySide6 import QtWidgets
+from PySide6.QtCore import QTimer
 
 from src.non_ui_components.servers import ThreadsUiServer
 from src.non_ui_components.uis_manager import UiWindowManager
 from src.non_ui_components.macos_services import register_open_in_cleanfinder_service
+from src.non_ui_components.app import CleanFinderApplication
 from src.ui_components.misc_widgets.menu_bar import populate_menubar_and_connect_triggers
 from src.shared.vars import conf_manager as conf, threads_server, logger as logger
 from src.installation import InstallationUiWidget
@@ -62,8 +63,19 @@ def start_app():
     # Kept in threads_server so the provider isn't garbage-collected while registered.
     threads_server['open_in_cleanfinder_service'] = \
         register_open_in_cleanfinder_service(ui_manager)
-    logger.info("Starting app - create_new_window")
-    ui_manager.create_new_window(root_dir_path=conf.DEFAULT_PATH)
+
+    # Wire the QFileOpenEvent router (`open -a CleanFinder <path>`, Finder "Open
+    # With", drag-onto-icon). Paths that arrived during launch are flushed now.
+    app = CleanFinderApplication.instance()
+    app.file_open_router.set_manager(ui_manager)
+
+    # Open the default window only if no path was opened via a file-open event.
+    # macOS delivers that event shortly after launch, so decide after a brief tick.
+    def open_default_window_if_none_opened():
+        if app.file_open_router.opened_count == 0 and len(ui_manager.windows) == 0:
+            logger.info("Starting app - create_new_window (default path)")
+            ui_manager.create_new_window(root_dir_path=conf.DEFAULT_PATH)
+    QTimer.singleShot(150, open_default_window_if_none_opened)
     logger.info(f"os.getcwd() = {os.getcwd()}")
     # Did not work on Sequoia 15.3 (functionality moved to the UI objects):
     # menubar = MebuBarManager(ui_manager)  # Takes care of menu bar requests
@@ -74,7 +86,7 @@ def main():
 
     # enforce_directories_and_files_exist()
     # profiler_handle = start_profiling()
-    app = QtWidgets.QApplication(sys.argv)
+    app = CleanFinderApplication(sys.argv)
     app.setStartDragTime(1)
     should_reset_file_path = os.path.join(os.getcwd(), 'should_reset.txt')
     enforce_should_reset_file_exists(should_reset_file_path)
