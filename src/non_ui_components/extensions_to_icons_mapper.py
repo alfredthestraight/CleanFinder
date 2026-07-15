@@ -33,7 +33,8 @@ class ExtensionsToIconsMapper:
         file_path --> file with the required extensions
         app_path --> the app that will be used to open files with extensions
         """
-        from src.utils.os_utils import get_app_supported_extensions_and_icons
+        from src.utils.os_utils import get_app_supported_extensions_and_icons, \
+            extract_extension_from_path
         app_extensions_and_icons_df = get_app_supported_extensions_and_icons(app_path)
         if app_extensions_and_icons_df.icon_full_path_exists.sum() == 0:
             new_row = app_extensions_and_icons_df.iloc[0, :]
@@ -41,7 +42,7 @@ class ExtensionsToIconsMapper:
             new_row = app_extensions_and_icons_df[app_extensions_and_icons_df.icon_full_path_exists].iloc[0, :]
         new_row = pd.DataFrame(new_row).T
 
-        file_extension = file_path.split('.')[-1]
+        file_extension = extract_extension_from_path(file_path)
         if file_extension in self._mapping_df.extension.values:
             self._mapping_df = self._mapping_df[
                 self._mapping_df.extension != file_extension
@@ -62,3 +63,11 @@ class ExtensionsToIconsMapper:
 
     def get_icon_path_for_extension(self, extension: str):
         return self._mapping_df[self._mapping_df.extension == extension].icon_full_path.iloc[0]
+
+    def get_default_app_for_extension(self, extension: str):
+        if not extension or extension not in self._mapping_df.extension.values:
+            return None
+        app = self._mapping_df[self._mapping_df.extension == extension].app_path_name.iloc[0]
+        if pd.isna(app):
+            return None
+        return app

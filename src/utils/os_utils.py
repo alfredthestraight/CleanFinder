@@ -720,6 +720,10 @@ def get_all_items_in_path(path: str, search_type: int = 0, extension: str = None
 
 
 def run_file_in_terminal(item_path: str, app_name: str = None):
+    if app_name is None:
+        # Honor a previously-chosen "default app for this file type" (if any).
+        app_name = extensions_to_icons_mapper.get_default_app_for_extension(
+            extract_extension_from_path(item_path))
     if chr(92) in item_path:
         item_path = item_path.replace(" ", chr(92) + " ")
     logger.info(f"run_file_in_terminal {item_path}, {app_name}")

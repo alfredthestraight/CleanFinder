@@ -64,6 +64,7 @@ class FileExplorerTable(QTableView):
 
         self.prev_selected_index = None
         self.last_selected_index = None
+        self._pending_created_item_name = None
 
         self.last_selection_change_time = 0.0
         self._type_ahead_buffer = ''
@@ -249,17 +250,15 @@ class FileExplorerTable(QTableView):
         return os.path.join(self.path, index.data())
 
     def select_rows(self, start_row: int, end_row: int):
+        # Single batched range selection so on_selectionChanged (which recomputes the selected
+        # files' total size) fires once, not once per row — keeps Shift+End/Home instantaneous.
         selection_model = self.selectionModel()
-        selection_model.clearSelection()  # Clear any previous selections
-
-        for row in range(start_row, end_row + 1):
-            index_top = self.index_at_row_and_col(row, 0)  # Top-left index of the row
-            index_bottom = self.index_at_row_and_col(row, 0)
-
-            selection_model.select(
-                QItemSelection(index_top, index_bottom),
-                QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
-            )
+        top = self.index_at_row_and_col(start_row, 0)
+        bottom = self.index_at_row_and_col(end_row, 0)
+        selection_model.select(
+            QItemSelection(top, bottom),
+            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+        )
 
     def select_row_where_item_text_is(self, txt: str):
         for row in range(self.num_items):
@@ -274,10 +273,13 @@ class FileExplorerTable(QTableView):
         for txt in txts_list:
             self.select_row_where_item_text_is(txt)
 
-    def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300):
-        self.print_stuff_timer = \
-            single_run_qtimer(delay,
-                              lambda: self.select_rows_where_items_texts_are(new_items_names))
+    def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300,
+                                                  clear_first=False):
+        def _do_select():
+            if clear_first:
+                self.clearSelection()
+            self.select_rows_where_items_texts_are(new_items_names)
+        self.print_stuff_timer = single_run_qtimer(delay, _do_select)
 
     """
      Structure change
@@ -566,7 +568,8 @@ class FileExplorerTable(QTableView):
                                        dialog.prefix +
                                        filename.replace(ext, "") +
                                        dialog.suffix +
-                                       ext)
+                                       ext,
+                                       select_after=False)
 
 
     def replace_substring_in_items_names(self):
@@ -595,20 +598,30 @@ class FileExplorerTable(QTableView):
             if '.' in filename:
                 ext = '.' + ext
             new_file_name = filename.replace(ext, "").replace(old_text, new_text) + ext
-            self.replace_item_name(filename, new_file_name)
+            self.replace_item_name(filename, new_file_name, select_after=False)
             new_items_names.append(new_file_name)
         return new_items_names
 
-    def replace_item_name(self, old_text: str, new_text: str):
+    def replace_item_name(self, old_text: str, new_text: str, select_after: bool = True):
         logger.info(f"FileExplorerTable.replace_item_name: {old_text} -> {new_text}")
+        # If this rename finalizes a just-created item, remember its name so we can keep it
+        # selected even when the rename is cancelled or a no-op (flag set only by create_*).
+        pending_created = self._pending_created_item_name
+        self._pending_created_item_name = None
         if old_text == '___User_clicked_esc___' and new_text == '___User_clicked_esc___':
+            if select_after and pending_created is not None:
+                self.delayed_select_rows_where_items_texts_are([pending_created], clear_first=True)
             return
         if old_text == new_text:
+            if select_after and pending_created is not None:
+                self.delayed_select_rows_where_items_texts_are([new_text], clear_first=True)
             return
         existing_names_in_path = self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
         approval = validate_name_change_is_approved(old_text, new_text,
                                                     new_text in existing_names_in_path)
         if approval == 0:
+            if select_after and pending_created is not None:
+                self.delayed_select_rows_where_items_texts_are([pending_created], clear_first=True)
             return
         changed_row = \
             np.where(self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX] == old_text)[0][0]
@@ -617,6 +630,9 @@ class FileExplorerTable(QTableView):
         # Update the name in the OS
         rename_file_or_dir(os.path.join(self.path, old_text), new_text)
         self.keep_last_action(UserAction_RenameItem(self.path, old_text, new_text))
+        # Keep the renamed/just-created item selected after the disk change re-sorts the table.
+        if select_after:
+            self.delayed_select_rows_where_items_texts_are([new_text], clear_first=True)
 
     def rename_item(self):
         if len(self.selected_items_paths) == 1:
@@ -740,6 +756,7 @@ class FileExplorerTable(QTableView):
         new_folder_path = os.path.join(self.browsing_history_manager.curr_path(), new_dir_name)
         logger.info("file_explorer_table.create_new_dir: " + new_folder_path)
         os.mkdir(new_folder_path)
+        self._pending_created_item_name = new_dir_name
         self.encompassing_uis_manager.keep_last_action(UserAction_CreateItem(new_folder_path))
         with self.watcher:  # Temporarily disable files watcher
             self.pandasModel.insertRows({'Name': new_dir_name,
@@ -765,6 +782,7 @@ class FileExplorerTable(QTableView):
         new_file_name = os.path.basename(new_file_path)
         logger.info("file_explorer_table.create_new_file: " + new_file_path)
         success = create_file(new_file_path)
+        self._pending_created_item_name = new_file_name
         self.encompassing_uis_manager.keep_last_action(UserAction_CreateItem(new_file_path))
         with self.watcher:  # Temporarily disable files watcher
             self.pandasModel.insertRows({'Name': new_file_name,
