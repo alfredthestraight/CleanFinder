@@ -37,7 +37,13 @@ from src.shared.vars import threads_server
 # Maps the configurable MULTISELECT_MODIFIER string to a Qt modifier flag. On macOS Qt swaps
 # Ctrl/Meta by default, so the Command key arrives as ControlModifier and the physical Control
 # key as MetaModifier. Qt's ExtendedSelection toggles individual rows on ControlModifier, so
-# remapping in mousePressEvent translates the chosen physical key into ControlModifier.
+# remapping translates the chosen physical key into ControlModifier.
+# The remap must be applied to press, move AND release, not just press: Qt re-derives the
+# selection command from whichever event it is handling. A real click always drifts a pixel or
+# two, and an un-remapped move event (carrying Alt rather than Control) makes Qt fall through to
+# ClearAndSelect, collapsing the selection to the clicked row instead of toggling it. Release
+# matters too: for a click on an already-selected row Qt returns NoUpdate on press (so a plain
+# drag can still move the whole selection) and decides on release.
 MULTISELECT_MODIFIER_MAP = {
     "command": Qt.KeyboardModifier.ControlModifier,
     "cmd": Qt.KeyboardModifier.ControlModifier,
@@ -353,6 +359,7 @@ class FileExplorerTable(QTableView):
         If user started by clicking not on an item, but on the empty space, and then moved the
         cursor - any item the cursor goes over will e included in the selection:
         """
+        event = self._remap_multiselect_modifier(event)
         if self.drag_start_pos:
             if event.buttons() == Qt.MouseButton.LeftButton:
                 self.setDragEnabled(False)
@@ -376,6 +383,7 @@ class FileExplorerTable(QTableView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        event = self._remap_multiselect_modifier(event)
         if self.structure_changed:
             self.structure_changed = False
             self.adapt_width_of_last_column()
