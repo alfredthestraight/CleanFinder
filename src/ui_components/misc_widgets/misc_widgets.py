@@ -1,69 +1,7 @@
 from PySide6 import QtWidgets
-from PySide6.QtCore import QSize, Signal
-from PySide6.QtWidgets import QToolBar, QLabel, QCheckBox, QPushButton, QHBoxLayout, QComboBox, \
-    QSplitter, QVBoxLayout, QFileDialog, QWidget, QDialog, QProgressBar, QDialogButtonBox
-
-
-class DropdownTextValues(QDialog):
-    apply = Signal(int)
-
-    def __init__(self, strings_list,
-                 buttons=QDialogButtonBox.StandardButton.Ok |
-                         QDialogButtonBox.StandardButton.Cancel |
-                         QDialogButtonBox.StandardButton.Apply,
-                 default_value: str = None, title: str = "", xdim: int = 200, ydim: int = 100):
-
-        super().__init__()
-        self.apply_clicked = False
-        self.default_value = default_value
-        self.buttonBox = QDialogButtonBox(buttons)
-        self.buttonBox.accepted.connect(self.accept)
-        self.buttonBox.rejected.connect(self.reject)
-
-        if self.contains_button('Apply'):
-            btn = self.buttonBox.button(QDialogButtonBox.StandardButton.Apply)
-            btn.clicked.connect(self._apply_clicked)
-
-        # Create a QComboBox
-        self.combo_box = QComboBox()
-
-        # Add values to the combo box
-        self.combo_box.addItems(strings_list)
-        if default_value is not None:
-            self.combo_box.setCurrentText(default_value)
-
-        # Create a layout and add the combo box to it
-        layout = QVBoxLayout()
-        layout.addWidget(self.combo_box)
-        layout.addWidget(self.buttonBox)
-
-        # Set the layout to the widget
-        self.setLayout(layout)
-
-        # Set window title and size
-        self.setWindowTitle(title)
-        self.resize(xdim, ydim)
-
-    def contains_button(self, button_text):
-        return len([b for b in [x for x in self.buttonBox.children() if isinstance(x, QPushButton)]
-                    if b.text() == button_text]) > 0
-
-    @property
-    def text(self):
-        return self.combo_box.currentText()
-
-    @text.setter
-    def text(self, new_text):
-        return self.combo_box.setCurrentText(new_text)
-
-    def showEvent(self, a0):
-        self.apply_clicked = False
-        if self.default_value is not None:
-            self.combo_box.setCurrentText(self.default_value)
-
-    def _apply_clicked(self):
-        self.apply.emit(1)
-
+from PySide6.QtCore import QSize
+from PySide6.QtWidgets import QToolBar, QLabel, QCheckBox, QPushButton, QHBoxLayout, \
+    QSplitter, QFileDialog, QWidget, QProgressBar
 
 
 class ProgressBar(QWidget):

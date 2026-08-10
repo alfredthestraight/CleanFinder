@@ -235,6 +235,8 @@ class SinglePathQFileSystemWatcherWithContextManager(QFileSystemWatcher):
     def __init__(self, path: str):
         self.path = path
         super(SinglePathQFileSystemWatcherWithContextManager, self).__init__()
+        if os.path.exists(self.path):
+            self.addPath(self.path)
 
     def __enter__(self):
         self.removePath(self.path)

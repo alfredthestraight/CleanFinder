@@ -58,7 +58,7 @@
             "FILE_EXPLORER_GRID_COLOR": "rgb(220, 220, 220)",
             "BOTTOM_STRIP_COLOR": "rgb(255, 255, 255)"
       },
-      "DATE_FORMAT": "%Y/%m/%d %H:%M",
+      "DATE_FORMAT": "%Y-%m-%d %H:%M",
       "icons": {
             "BACKWARD_ICON_NAME": "_back_arrow_",
             "FORWARD_ICON_NAME": "_forward_arrow_",
@@ -209,13 +209,14 @@
       },
       "FILE_EXPLORER_GRID_THICKNESS": 1,
       "WINDOW_WIDTH": 798,
-      "WINDOW_HEIGHT": 670,
+      "WINDOW_HEIGHT": 671,
       "TOP_TOOLBAR_HEIGHT": 200,
       "BOTTOM_TOOLBAR_HEIGHT": 24,
-      "FILE_EXPLORER_WIDTH": 597,
+      "FILE_EXPLORER_WIDTH": 574,
       "LEFT_PANE_WIDTH": 162,
+      "LEFT_PANE_WIDTH_BEFORE_HIDE": 165,
       "FILE_EXPLORER_COL_WIDTH_1": 215,
       "FILE_EXPLORER_COL_WIDTH_2": 174,
       "FILE_EXPLORER_COL_WIDTH_3": 90,
-      "FILE_EXPLORER_COL_WIDTH_4": 98
+      "FILE_EXPLORER_COL_WIDTH_4": 75
 }

@@ -1241,6 +1241,11 @@ class FileExplorerTable(QTableView):
 
     # Reacts to changes in the file system (e.g., renaming, deleting, etc.)
     def connect_filesystem_watcher(self):
+        if getattr(self, 'watcher', None) is not None:
+            self.watcher.directoryChanged.disconnect(self._refresh_source_data)
+            self.watcher.fileChanged.disconnect(self._refresh_source_data)
+            if self.watcher.path in self.watcher.directories():
+                self.watcher.removePath(self.watcher.path)
         self.watcher = SinglePathQFileSystemWatcherWithContextManager(self.path)
         self.watcher.directoryChanged.connect(self._refresh_source_data)
         self.watcher.fileChanged.connect(self._refresh_source_data)

@@ -4,8 +4,8 @@ import shutil
 import pandas as pd
 
 from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel, QFileDialog, \
-    QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, QDialogButtonBox, \
-    QScrollArea, QFrame
+    QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, \
+    QScrollArea, QFrame, QStyledItemDelegate, QComboBox, QSpinBox, QDoubleSpinBox
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QIcon, QAction, QFontDatabase
@@ -17,7 +17,6 @@ from src.utils.os_utils import extract_extension_from_path
 from src.ui_components.misc_widgets.shortcut_keys_configuration import KeyboardShortcutSelectorUi
 from src.ui_components.misc_widgets.dialogs_and_messages import CustomQDialogButtonBox, \
     QDialogButtonsAndWidgets
-from src.ui_components.misc_widgets.misc_widgets import DropdownTextValues
 from src.ui_components.misc_widgets.shortcut_keys_configuration import LabelsSelectionPerCategory
 
 
@@ -49,28 +48,6 @@ class folder_picker:
         if folder:
             self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
                                             folder, Qt.ItemDataRole.EditRole)
-
-
-class date_format_picker:
-    def __init__(self, row: int, styles_tbl: QTableView, curr_format: str):
-        self.row = row
-        self.styles_tbl = styles_tbl
-        self.curr_format = curr_format
-        self.available_formats = ["%Y/%m/%d %H:%M",
-                                  "%Y-%m-%d %H:%M",
-                                  "%Y/%m/%d %H:%M:%S",
-                                  "%Y-%m-%d %H:%M:%S"]
-
-    def __call__(self):
-        self.selection_widget = DropdownTextValues(
-            self.available_format,
-            buttons=QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-            default_value=self.curr_format
-        )
-        btn_selected = self.selection_widget.exec()
-        if btn_selected == 1:
-            self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
-                                            self.selection_widget.text, Qt.ItemDataRole.EditRole)
 
 
 class font_picker:
@@ -118,39 +95,102 @@ class font_picker:
                                         family, Qt.ItemDataRole.EditRole)
 
 
+class numeric_value_changed:
+    """Writes a numeric (up/down spin box) edit back into the styles table's model,
+    the same way the picker buttons above write their picked value back."""
+
+    def __init__(self, row: int, styles_tbl: QTableView):
+        self.row = row
+        self.styles_tbl = styles_tbl
+
+    def __call__(self, value):
+        self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
+                                        value, Qt.ItemDataRole.EditRole)
+
+
+class ConfigDropdownDelegate(QStyledItemDelegate):
+    """Item delegate for the "Value" column of the configure-styles table: cells for
+    known fixed-choice settings edit via a dropdown instead of a free-text line edit.
+    Other cells fall back to the default text editor.
+
+    - Any cell whose current value is exactly 'Y' or 'N' gets a Y/N dropdown.
+    - The "Multiselect modifier key" row gets a command/control/option/shift dropdown.
+    - The "Date format" row gets a dropdown of the supported strftime formats.
+    """
+
+    MODIFIER_KEY_CHOICES = ['command', 'control', 'option', 'shift']
+    # Abbreviations MULTISELECT_MODIFIER also accepts (see MULTISELECT_MODIFIER_MAP
+    # in file_explorer_table.py), normalized to their canonical dropdown entry.
+    MODIFIER_KEY_ABBREVIATIONS = {'cmd': 'command', 'ctrl': 'control', 'alt': 'option'}
+
+    DATE_FORMAT_CHOICES = ["%Y/%m/%d %H:%M",
+                           "%Y-%m-%d %H:%M",
+                           "%Y/%m/%d %H:%M:%S",
+                           "%Y-%m-%d %H:%M:%S"]
+
+    def _row_kind(self, index):
+        feature = str(index.model().index(index.row(), 1).data(Qt.ItemDataRole.EditRole)).lower()
+        if 'multiselect modifier' in feature:
+            return 'modifier'
+        if feature == 'date format':
+            return 'date_format'
+        if str(index.data(Qt.ItemDataRole.EditRole)) in ('Y', 'N'):
+            return 'yes_no'
+        return None
+
+    def _choices_for_kind(self, kind):
+        return {'modifier': self.MODIFIER_KEY_CHOICES,
+               'date_format': self.DATE_FORMAT_CHOICES,
+               'yes_no': ['Y', 'N']}[kind]
+
+    def createEditor(self, parent, option, index):
+        kind = self._row_kind(index)
+        if kind is not None:
+            combo = QComboBox(parent)
+            combo.addItems(self._choices_for_kind(kind))
+            # Commit & close as soon as a value is picked, rather than waiting for
+            # the editor to lose focus.
+            combo.currentIndexChanged.connect(lambda _: self.commitData.emit(combo))
+            combo.currentIndexChanged.connect(lambda _: self.closeEditor.emit(combo))
+            return combo
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        if isinstance(editor, QComboBox):
+            current = str(index.data(Qt.ItemDataRole.EditRole))
+            if self._row_kind(index) == 'modifier':
+                current = self.MODIFIER_KEY_ABBREVIATIONS.get(current.lower(), current.lower())
+            found = editor.findText(current)
+            editor.setCurrentIndex(found if found >= 0 else 0)
+        else:
+            super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        if isinstance(editor, QComboBox):
+            model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
+        else:
+            super().setModelData(editor, model, index)
+
+
 # Create the menu bar
 def populate_menubar_and_connect_triggers(ui_obj: QMainWindow, menubar_manager):
 
     ui_obj.menu_bar = ui_obj.menuBar()
 
-    # Add a file menu
+    # Add a file menu (intentionally empty - no actions)
     ui_obj.file_menu = QMenu("File", ui_obj)
     ui_obj.menu_bar.addMenu(ui_obj.file_menu)
 
-    # Add actions to the file menu
-    ui_obj.new_folder_action = QAction("Create new folder", ui_obj)
-    ui_obj.new_file_action = QAction("Create file", ui_obj)
-    ui_obj.save_action = QAction("Save", ui_obj)
-
-    ui_obj.file_menu.addAction(ui_obj.new_folder_action)
-    ui_obj.file_menu.addAction(ui_obj.new_file_action)
-    ui_obj.file_menu.addSeparator()
-    ui_obj.file_menu.addAction(ui_obj.save_action)
-
-    # Add an edit menu
-    ui_obj.edit_menu = QMenu("Edit", ui_obj)
-    ui_obj.edit_menu = ui_obj.menu_bar.addMenu("Edit")
+    # Add an edit menu (titled "Configure" rather than "Edit" so macOS doesn't
+    # auto-inject its standard Edit-menu items, e.g. "Autofill", into it)
+    ui_obj.edit_menu = ui_obj.menu_bar.addMenu("Configure")
 
     # Add actions to the edit menu
-    ui_obj.copy_action = QAction("Copy", ui_obj)
-    ui_obj.paste_action = QAction("Paste", ui_obj)
     ui_obj.configure_keyboard_shortcuts_action = QAction("Keyboard shortcuts", ui_obj)
     ui_obj.configure_styles_action = QAction("Edit configurations", ui_obj)
     ui_obj.show_hide_left_pane = QAction("Show / Hide left pane", ui_obj)
     # ui_obj.zoom_action = QAction("Zoom", ui_obj)
 
-    ui_obj.edit_menu.addAction(ui_obj.copy_action)
-    ui_obj.edit_menu.addAction(ui_obj.paste_action)
     ui_obj.edit_menu.addAction(ui_obj.configure_keyboard_shortcuts_action)
     ui_obj.edit_menu.addAction(ui_obj.configure_styles_action)
     ui_obj.edit_menu.addAction(ui_obj.show_hide_left_pane)
@@ -189,8 +229,11 @@ class MebuBarManager(QMainWindow):
     def run_show_hide_left_pane(self):
         print("configure_keymap")
         if conf.LEFT_PANE_WIDTH == 0:
-            conf.set_attr('LEFT_PANE_WIDTH', 550)
+            # Restore the width it had right before it was last hidden.
+            conf.set_attr('LEFT_PANE_WIDTH', conf.LEFT_PANE_WIDTH_BEFORE_HIDE)
         else:
+            # Remember the current width so it can be restored later, then hide.
+            conf.set_attr('LEFT_PANE_WIDTH_BEFORE_HIDE', conf.LEFT_PANE_WIDTH)
             conf.set_attr('LEFT_PANE_WIDTH', 0)
         self.uis_manager.show_or_hide_left_panes()
 
@@ -293,6 +336,8 @@ class MebuBarManager(QMainWindow):
 
         self.styles_df = SimplePandasModel2(self.config_data)
         self.styles_table.setModel(self.styles_df)
+        self.styles_value_delegate = ConfigDropdownDelegate(self.styles_table)
+        self.styles_table.setItemDelegateForColumn(2, self.styles_value_delegate)
         self.styles_table.hideColumn(0)
         self.styles_table.hideColumn(3)
         self.styles_table.setColumnWidth(1, 300)
@@ -311,9 +356,6 @@ class MebuBarManager(QMainWindow):
             elif self.config_data.loc[i, 'config_keys_path'][0] == 'DEFAULT_PATH':
                 btn.setIcon(QIcon(get_full_icon_path('_symlink_dir_')))
                 btn.clicked.connect(folder_picker(i, self.styles_table))
-            elif self.config_data.loc[i, 'config_keys_path'][0] == 'DATE_FORMAT':
-                btn.setIcon(QIcon(get_full_icon_path('_date_format_picker_')))
-                btn.clicked.connect(date_format_picker(i, self.styles_table, conf.DATE_FORMAT))
             elif self.config_data.loc[i, 'Feature'] == 'Font':
                 btn.setIcon(QIcon(get_full_icon_path('_font_picker_')))
                 btn.clicked.connect(font_picker(i, self.styles_table))
@@ -321,6 +363,21 @@ class MebuBarManager(QMainWindow):
                 continue
             self.style_selection_buttons[i] = btn
             self.styles_table.setIndexWidget(self.styles_table.model().index(i, 4), btn)
+
+        # Numeric settings get an up/down spin box in the Value cell itself, so they
+        # can still be typed into directly as well as stepped with the arrows.
+        self.style_numeric_spinboxes = {}
+        for i in range(self.config_data.shape[0]):
+            value_type = self.config_data.loc[i, 'value_type']
+            if value_type not in ('int', 'float'):
+                continue
+            spin = QSpinBox() if value_type == 'int' else QDoubleSpinBox()
+            spin.setMinimum(0)  # Values below 0 are not allowed
+            spin.setMaximum(999999)
+            spin.setValue(self.config_data.iloc[i, 2])
+            spin.valueChanged.connect(numeric_value_changed(i, self.styles_table))
+            self.style_numeric_spinboxes[i] = spin
+            self.styles_table.setIndexWidget(self.styles_table.model().index(i, 2), spin)
 
         self.styles_window.resize(678, 800)
 

@@ -163,6 +163,10 @@ class ConfigurationsManager:
         self.FILE_EXPLORER_SHOW_ROW_NUMBERS = self.config["FILE_EXPLORER_SHOW_ROW_NUMBERS"]
         self.FILE_EXPLORER_WIDTH = self.config['FILE_EXPLORER_WIDTH']
         self.LEFT_PANE_WIDTH = self.config['LEFT_PANE_WIDTH']
+        # Remembers the width the left pane had right before "Show / Hide left pane"
+        # collapsed it to 0, so it can be restored to the same width on re-show.
+        self.LEFT_PANE_WIDTH_BEFORE_HIDE = self.config.get('LEFT_PANE_WIDTH_BEFORE_HIDE',
+                                                            self.config['LEFT_PANE_WIDTH'])
         self.FILE_EXPLORER_COL_WIDTH_1 = self.config['FILE_EXPLORER_COL_WIDTH_1']
         self.FILE_EXPLORER_COL_WIDTH_2 = self.config['FILE_EXPLORER_COL_WIDTH_2']
         self.FILE_EXPLORER_COL_WIDTH_3 = self.config['FILE_EXPLORER_COL_WIDTH_3']
@@ -491,6 +495,7 @@ class ConfigurationsManager:
             "BOTTOM_TOOLBAR_HEIGHT": 200,
             "FILE_EXPLORER_WIDTH": 692,
             "LEFT_PANE_WIDTH": 203,
+            "LEFT_PANE_WIDTH_BEFORE_HIDE": 203,
             "FILE_EXPLORER_COL_WIDTH_1": 273,
             "FILE_EXPLORER_COL_WIDTH_2": 174,
             "FILE_EXPLORER_COL_WIDTH_3": 90,
