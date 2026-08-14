@@ -6,7 +6,8 @@ import numpy as np
 import datetime
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtGui import QFont, QColor, QPixmap, QKeySequence, QDrag, QShortcut, QMouseEvent
-from PySide6.QtCore import Qt, QSize, QItemSelectionModel, QMimeData, QUrl, QRect, QItemSelection, QEvent
+from PySide6.QtCore import (Qt, QSize, QItemSelectionModel, QMimeData, QUrl, QRect, QItemSelection,
+                            QEvent, QTimer)
 from PySide6.QtWidgets import (QApplication, QTableView, QAbstractItemView, QMessageBox,
                                QScrollBar, QHeaderView)
 from src.ui_components.misc_widgets.properties_window import (PropertiesWindowSingleItem,
@@ -157,7 +158,11 @@ class FileExplorerTable(QTableView):
         except:
             pass
 
-        # Track changes in the file system
+        # Track changes in the file system. Refreshes go through a debounce timer - see
+        # _schedule_refresh - so a burst of changes costs one directory re-read, not hundreds.
+        self._refresh_debounce_timer = QTimer(self)
+        self._refresh_debounce_timer.setSingleShot(True)
+        self._refresh_debounce_timer.timeout.connect(self._refresh_source_data)
         self.connect_filesystem_watcher()
 
 
@@ -267,17 +272,38 @@ class FileExplorerTable(QTableView):
         )
 
     def select_row_where_item_text_is(self, txt: str):
-        for row in range(self.num_items):
-            if txt == self.pandasModel.index(row, 0).data():
-                source_index = self.pandasModel.index(row, 0)
-                self.selectionModel().select(source_index,
-                                             QItemSelectionModel.SelectionFlag.Select |
-                                             QItemSelectionModel.SelectionFlag.Rows)
-                return
+        self.select_rows_where_items_texts_are([txt])
 
     def select_rows_where_items_texts_are(self, txts_list: list[str]):
-        for txt in txts_list:
-            self.select_row_where_item_text_is(txt)
+        # One pass over the table matching against a set, and one batched selection. Scanning
+        # every row once per wanted name (and selecting row by row) made pasting a few thousand
+        # files into a large folder freeze the UI for minutes after the copy had finished.
+        if len(txts_list) == 0:
+            return
+        wanted = set(txts_list)
+        filenames = self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
+        matching_rows = [row for row, name in enumerate(filenames) if name in wanted]
+        if len(matching_rows) == 0:
+            return
+
+        # Collapse consecutive rows into ranges so the selection model gets a handful of blocks
+        # instead of one select() call - and one on_selectionChanged - per row
+        selection = QItemSelection()
+        range_start = matching_rows[0]
+        prev_row = matching_rows[0]
+        for row in matching_rows[1:] + [None]:
+            if row is not None and row == prev_row + 1:
+                prev_row = row
+                continue
+            selection.select(self.pandasModel.index(range_start, 0),
+                             self.pandasModel.index(prev_row, 0))
+            if row is not None:
+                range_start = row
+                prev_row = row
+
+        self.selectionModel().select(selection,
+                                     QItemSelectionModel.SelectionFlag.Select |
+                                     QItemSelectionModel.SelectionFlag.Rows)
 
     def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300,
                                                   clear_first=False):
@@ -774,7 +800,7 @@ class FileExplorerTable(QTableView):
                                          'file_type': conf.FOLDER_ICON_NAME,
                                          'size_raw': 0,
                                          'extension_n_char': 0,
-                                         'date_modified_raw': os.path.getctime(new_folder_path),
+                                         'date_modified_raw': os.path.getmtime(new_folder_path),
                                          'is_folder': True, 'is_hidden': False})
         self.click_timer = \
             single_run_qtimer(100, self.invoke_filename_editor,
@@ -801,7 +827,7 @@ class FileExplorerTable(QTableView):
                                          'size_raw': 0,
                                          'extension_n_char':
                                              len(extract_extension_from_path(new_file_path)),
-                                         'date_modified_raw': os.path.getctime(new_file_path),
+                                         'date_modified_raw': os.path.getmtime(new_file_path),
                                          'is_folder': False, 'is_hidden': False})
         self.click_timer = \
             single_run_qtimer(100, self.invoke_filename_editor,
@@ -1178,10 +1204,22 @@ class FileExplorerTable(QTableView):
             self.setColumnWidth(col_width_pair[0], col_width_pair[1])
 
 
+    def _schedule_refresh(self, changed_path: str = None):
+        """
+        Coalesces filesystem-change notifications into a single refresh. A paste or delete of N
+        items fires up to N notifications, and each _refresh_source_data is a full directory
+        re-read on the UI thread - restarting this timer collapses the whole burst into one.
+        """
+        self._refresh_debounce_timer.start(conf.REFRESH_DEBOUNCE_MS)
+
     def _refresh_source_data(self):
         logger.info("FileExplorerTable._refresh_source_data")
-        with self.watcher:  # Temporarily disable files watcher
-            self.pandasModel.refresh_data()
+        # NOTE: deliberately not wrapped in `with self.watcher:`. That removes and re-adds the
+        # only watched path, which tears down and rebuilds the FSEvents stream on every refresh
+        # (slow, and changes landing in the gap are lost). A refresh we trigger ourselves is
+        # harmless now: it coalesces through _schedule_refresh, and refresh_data() early-returns
+        # when the directory contents are unchanged.
+        self.pandasModel.refresh_data()
         # Select the item which was selected before the refresh
         if self.prev_selected_index is not None:
             row = self.prev_selected_index.row()
@@ -1242,10 +1280,12 @@ class FileExplorerTable(QTableView):
     # Reacts to changes in the file system (e.g., renaming, deleting, etc.)
     def connect_filesystem_watcher(self):
         if getattr(self, 'watcher', None) is not None:
-            self.watcher.directoryChanged.disconnect(self._refresh_source_data)
-            self.watcher.fileChanged.disconnect(self._refresh_source_data)
+            self.watcher.directoryChanged.disconnect(self._schedule_refresh)
+            self.watcher.fileChanged.disconnect(self._schedule_refresh)
             if self.watcher.path in self.watcher.directories():
                 self.watcher.removePath(self.watcher.path)
+        # Drop a refresh queued for the directory we just navigated away from
+        self._refresh_debounce_timer.stop()
         self.watcher = SinglePathQFileSystemWatcherWithContextManager(self.path)
-        self.watcher.directoryChanged.connect(self._refresh_source_data)
-        self.watcher.fileChanged.connect(self._refresh_source_data)
+        self.watcher.directoryChanged.connect(self._schedule_refresh)
+        self.watcher.fileChanged.connect(self._schedule_refresh)

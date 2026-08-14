@@ -1,11 +1,15 @@
 import pandas as pd
 from pathlib import Path
+from typing import Callable
 import os
+import stat
 import shutil
 import shlex
 import icnsutil
 import datetime
 import plistlib
+import threading
+import time
 
 import numpy as np
 import subprocess
@@ -71,6 +75,16 @@ def extract_extension_from_path(path: str) -> str:
     path_suff = str(path).split(os.sep)[-1:][0]
     extension = path_suff.split('.')[-1:][0]
     return extension
+
+
+def extract_extension_from_name(file_name: str) -> str:
+    """
+    extract_extension_from_path for a caller that already knows the item is not a directory -
+    same result, without the is_dir() stat.
+    """
+    if '.' not in file_name:
+        return ''
+    return file_name.split('.')[-1:][0]
 
 
 # E.g., "...Desktop/file.txt" -> "...Desktop"
@@ -206,6 +220,37 @@ def is_hidden(file_path: str) -> bool:
     return url.getResourceValue_forKey_error_(None, NSURLIsHiddenKey, None)[1]
 
 
+def is_hidden_from_stat(file_name: str, stat_result) -> bool:
+    """
+    Same answer as is_hidden(), from a stat() the caller already has. That is what
+    NSURLIsHiddenKey reports - a leading dot, or the UF_HIDDEN flag - and it saves an
+    Objective-C round trip per item when listing a directory.
+    """
+    if file_name.startswith('.'):
+        return True
+    return bool(getattr(stat_result, 'st_flags', 0) & stat.UF_HIDDEN)
+
+
+# get_file_type asks Launch Services for a localized type description, which is a per-UTI answer
+# and therefore identical for every item sharing an extension. Listing a directory used to pay
+# that round trip once per item.
+_file_type_cache = {}
+
+
+def get_file_type_cached(file_path: str, is_dir: bool) -> str:
+    """Memoized get_file_type, keyed by what actually determines the answer."""
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension == '':
+        # Without an extension Launch Services falls back to inspecting the item itself, so two
+        # extensionless files can legitimately differ ("Document" vs "Unix Executable File").
+        # Nothing to key on, so these are asked individually.
+        return get_file_type(file_path)
+    cache_key = (extension, is_dir)
+    if cache_key not in _file_type_cache:
+        _file_type_cache[cache_key] = get_file_type(file_path)
+    return _file_type_cache[cache_key]
+
+
 def get_file_apps_info(path: str, output_uti: bool = False):
     url = NSURL.fileURLWithPath_(path)
     if url is None:
@@ -238,7 +283,7 @@ def is_path_an_app(path: str) -> bool:
 
 
 def get_item_date_modified(path: str) -> str:
-    return datetime.datetime.fromtimestamp(os.path.getctime(path)).strftime(conf.DATE_FORMAT)
+    return datetime.datetime.fromtimestamp(os.path.getmtime(path)).strftime(conf.DATE_FORMAT)
 
 
 def is_read_only(path: str) -> bool:
@@ -258,14 +303,92 @@ Icons
 """
 
 
-def get_icon_names(paths_list: list[str]) -> pd.DataFrame:
+# A dead network mount (an abandoned WebDAV/SMB/AFP volume left under /Volumes after
+# its server went away) keeps answering stat() with a multi-minute kernel timeout rather
+# than an error. Probing such a path from the UI thread freezes the whole app, so any
+# probe of a user-supplied path gets a short deadline instead of waiting it out.
+UNREACHABLE_PATH_TIMEOUT = 1.0
+
+# Marks a probe that finished with an error, to tell it apart from one that never
+# answered at all. Errors are dropped (a caller's `how='left'` merge handles the gap);
+# non-answers get a fallback, since the item itself is still worth showing.
+_PROBE_FAILED = object()
+
+
+def _probe_paths_with_deadline(paths_list: list[str], timeout: float) -> dict:
+    """
+    Resolve every path's icon-type string, giving up on the ones that don't answer
+    within `timeout`. All probes run at once, so the deadline is paid once overall
+    rather than once per path. Threads left behind on a dead mount are daemons: they
+    unblock when the kernel times out, and never hold up interpreter shutdown.
+    """
+    answers = {}
+    lock = threading.Lock()
+
+    def probe(path):
+        try:
+            icon_type = get_type_as_icon_string(Path(path))
+        except Exception:
+            with lock:
+                answers[path] = _PROBE_FAILED
+            return
+        with lock:
+            answers[path] = icon_type
+
+    probes = [threading.Thread(target=probe, args=(p,), daemon=True) for p in paths_list]
+    for p in probes:
+        p.start()
+    deadline = time.monotonic() + timeout
+    for p in probes:
+        p.join(max(0.0, deadline - time.monotonic()))
+
+    with lock:
+        return dict(answers)
+
+
+def get_icon_names(paths_list: list[str],
+                   timeout: float = UNREACHABLE_PATH_TIMEOUT) -> dict:
+    answers = _probe_paths_with_deadline(paths_list, timeout)
     types = {}
     for x in paths_list:
-        try:
-            types[x] = get_type_as_icon_string(Path(x))
-        except:
-            pass
+        answer = answers.get(x, None)
+        if answer is None:
+            # Never answered - an unreachable mount. Show it as a folder rather than
+            # dropping the item, so a bookmark to an offline volume stays visible.
+            logger.warning("get_icon_names: no answer for '" + str(x) +
+                           "' within " + str(timeout) + "s - treating as unreachable")
+            types[x] = conf.FOLDER_ICON_NAME
+        elif answer is not _PROBE_FAILED:
+            types[x] = answer
     return types
+
+
+def is_reachable_path(path: str, timeout: float = UNREACHABLE_PATH_TIMEOUT) -> bool:
+    """
+    Whether `path` exists and answers within `timeout`. False for a path sitting on a
+    mount that has stopped responding - letting callers refuse to navigate there
+    instead of blocking the UI thread on it.
+    """
+    answer = []
+    lock = threading.Lock()
+
+    def probe():
+        try:
+            exists = os.path.exists(path)
+        except Exception:
+            exists = False
+        with lock:
+            answer.append(exists)
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    with lock:
+        if not answer:
+            logger.warning("is_reachable_path: '" + str(path) + "' did not answer within " +
+                           str(timeout) + "s - treating as unreachable")
+            return False
+        return answer[0]
 
 
 def extract_extensions_and_icons(x):
@@ -307,18 +430,37 @@ def get_file_icon(file_path: str):
     return url.getResourceValue_forKey_error_(None, NSURLEffectiveIconKey, None)
 
 
-def get_type_as_icon_string(path: str) -> str:
+# The set of extensions we have an icon for, rebuilt only when the mapper changes. Building it
+# per item meant a 400+ element set() per row on every directory listing.
+_usable_icon_extensions_cache = {'num_rows': -1, 'extensions': frozenset()}
+
+
+def usable_icon_extensions() -> frozenset:
+    icons_df = extensions_to_icons_mapper.USABLE_EXTENSIONS_AND_ICONS_DF
+    if _usable_icon_extensions_cache['num_rows'] != len(icons_df):
+        _usable_icon_extensions_cache['num_rows'] = len(icons_df)
+        _usable_icon_extensions_cache['extensions'] = frozenset(icons_df['extension'])
+    return _usable_icon_extensions_cache['extensions']
+
+
+def get_type_as_icon_string(path: str, is_dir: bool = None, extension: str = None) -> str:
     """
     Used to identify which icon is relevant to present next to the item
     Examples:
     '.../data.txt' -> 'txt'
     '.../myFolder' -> '_folder_'
     '.../myFile.some_strange_extension' -> '_file_'
+
+    is_dir / extension let a caller that already knows them skip the stat() this would
+    otherwise do - worth passing when listing a whole directory.
     """
-    if Path(path).is_dir():
+    if is_dir is None:
+        is_dir = Path(path).is_dir()
+    if is_dir:
         return conf.FOLDER_ICON_NAME
-    extension = extract_extension_from_path(path)
-    if extension not in set(extensions_to_icons_mapper.USABLE_EXTENSIONS_AND_ICONS_DF['extension']):
+    if extension is None:
+        extension = extract_extension_from_path(path)
+    if extension not in usable_icon_extensions():
         return conf.FILE_ICON_NAME
     else:
         return extension
@@ -532,10 +674,8 @@ def copy_item_to_dir(item_full_path: str, dest_dir: str, override: bool = True):
             return 0
         try:
             if os.path.isdir(item_full_path):
-                logger.info("copy_item_to_dir (True): " + item_full_path + " " + dest_dir)
                 shutil.copytree(item_full_path, os.path.join(dest_dir, item_name))
             else:
-                logger.info("copy_item_to_dir (True): " + item_full_path + " " + dest_dir)
                 shutil.copy(item_full_path, os.path.join(dest_dir, item_name))
             return 1
         except:
@@ -550,16 +690,147 @@ def copy_item(item_full_path: str, dest_item_full_path: str):
     if os.path.exists(item_full_path):
         try:
             if os.path.isdir(item_full_path):
-                logger.info("copy_item (True): " + item_full_path + " " + item_full_path)
                 shutil.copytree(item_full_path, dest_item_full_path)
             else:
-                logger.info("copy_item (True): " + item_full_path + " " + item_full_path)
                 shutil.copy(item_full_path, dest_item_full_path)
             return 1
         except:
             return -1
     else:
         return -1
+
+
+def count_tree(src: str) -> tuple[int, int]:
+    """
+    Counts the files under <src> and their total size in bytes, so a copy can report progress
+    against a known total. Recurses with os.scandir and never follows directory symlinks.
+    Returns (num_files, total_bytes). Unreadable entries are skipped rather than raising - the
+    total is only used to drive a progress bar.
+    """
+    num_files = 0
+    total_bytes = 0
+    if not os.path.isdir(src) or os.path.islink(src):
+        try:
+            return 1, os.lstat(src).st_size
+        except OSError:
+            return 1, 0
+
+    dirs_to_visit = [src]
+    while dirs_to_visit:
+        current_dir = dirs_to_visit.pop()
+        try:
+            with os.scandir(current_dir) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs_to_visit.append(entry.path)
+                        else:
+                            num_files += 1
+                            total_bytes += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return num_files, total_bytes
+
+
+def copy_tree_with_progress(src: str,
+                            dest: str,
+                            should_stop: Callable[[], bool] = None,
+                            on_file_done: Callable[[int], None] = None) -> int:
+    """
+    Copies <src> to <dest> one file at a time, so the copy can be stopped part-way and can report
+    progress. This is what the pasting thread uses instead of shutil.copytree, which is neither
+    interruptible nor observable.
+
+    should_stop()   - polled before every file; returning True aborts the copy
+    on_file_done(n) - called after each file with the bytes just copied
+
+    Returns 1 copied, 0 nothing to do, -1 error, -2 aborted. On abort the partially written
+    destination is removed, so a cancelled paste doesn't leave half a folder behind.
+    """
+    if src == dest:
+        return 0
+    if not os.path.exists(src):
+        return -1
+
+    def _stop() -> bool:
+        return should_stop is not None and should_stop()
+
+    def _file_done(num_bytes: int):
+        if on_file_done is not None:
+            on_file_done(num_bytes)
+
+    # A plain file (or a symlink to one) is a single copy, no walking needed
+    if not os.path.isdir(src) or os.path.islink(src):
+        if _stop():
+            return -2
+        try:
+            shutil.copy2(src, dest, follow_symlinks=False)
+            _file_done(os.path.getsize(dest) if os.path.exists(dest) else 0)
+            return 1
+        except Exception:
+            logger.exception(f"copy_tree_with_progress failed to copy file {src} -> {dest}")
+            return -1
+
+    aborted = False
+    failed = False
+    # (source dir, destination dir) pairs still to walk
+    dirs_to_visit = [(src, dest)]
+    # Every directory pair created, so their metadata can be copied once their contents are in
+    # place - writing into a directory bumps its mtime, so copystat has to come after, not before
+    dirs_created = []
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except Exception:
+        logger.exception(f"copy_tree_with_progress could not create {dest}")
+        return -1
+
+    while dirs_to_visit and not aborted:
+        current_src, current_dest = dirs_to_visit.pop()
+        try:
+            entries = list(os.scandir(current_src))
+        except OSError:
+            logger.exception(f"copy_tree_with_progress could not read {current_src}")
+            failed = True
+            continue
+
+        for entry in entries:
+            if _stop():
+                aborted = True
+                break
+            entry_dest = os.path.join(current_dest, entry.name)
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    os.makedirs(entry_dest, exist_ok=True)
+                    dirs_to_visit.append((entry.path, entry_dest))
+                    dirs_created.append((entry.path, entry_dest))
+                else:
+                    shutil.copy2(entry.path, entry_dest, follow_symlinks=False)
+                    _file_done(entry.stat(follow_symlinks=False).st_size)
+            except Exception:
+                logger.exception(f"copy_tree_with_progress failed on {entry.path}")
+                failed = True
+
+    if aborted:
+        # Only ever removes the destination this call created
+        try:
+            if os.path.isdir(dest):
+                shutil.rmtree(dest, ignore_errors=True)
+        except Exception:
+            logger.exception(f"copy_tree_with_progress could not clean up aborted {dest}")
+        return -2
+
+    if failed:
+        return -1
+
+    # Directory metadata is copied last, once contents are in place (deepest first)
+    for dir_src, dir_dest in reversed(dirs_created + [(src, dest)]):
+        try:
+            shutil.copystat(dir_src, dir_dest)
+        except Exception:
+            pass
+    return 1
 
 
 def copy_and_paste_item(item_full_path: str,
@@ -647,7 +918,6 @@ def get_dataframe_of_file_names_in_directory(directory_path: str) -> pd.DataFram
                              'is_folder': [],
                              'is_hidden': [],
                              })
-    p = Path(directory_path)
     file_name = []
     date_modified = []
     date_modified_raw = []
@@ -658,32 +928,42 @@ def get_dataframe_of_file_names_in_directory(directory_path: str) -> pd.DataFram
     extension_n_char = []
     is_folder_ = []
     is_hidden_ = []
-    for x in p.iterdir():
-        new_path = os.path.join(directory_path, x.name)
+    date_format = conf.DATE_FORMAT
+    # One scandir pass reusing a single stat() per item. This runs on the UI thread for every
+    # refresh of every visible pane, so the per-item cost here is what a folder change costs.
+    try:
+        entries = list(os.scandir(directory_path))
+    except OSError:
+        entries = []
+    for x in entries:
+        new_path = x.path
         try:
-            file_name_ = x.name
-            date_modified_ = get_item_date_modified(new_path)
-            type_icon = get_type_as_icon_string(Path(new_path))
-            type_ = get_file_type(new_path)
-            size_ = Path(new_path).stat().st_size
-            ext_n_char_ = len(extract_extension_from_path(Path(new_path)))
-            date_modified_raw_ = os.path.getctime(new_path)
+            stat_result = x.stat()
+            is_dir_ = x.is_dir()
+            size_ = stat_result.st_size
+            mtime_ = stat_result.st_mtime
+            type_ = get_file_type_cached(new_path, is_dir_)
+            extension_ = '' if is_dir_ else extract_extension_from_name(x.name)
 
-            is_folder_.append(Path(new_path).is_dir())
-            file_name.append(file_name_)
-            date_modified.append(date_modified_)
+            is_folder_.append(is_dir_)
+            file_name.append(x.name)
+            date_modified.append(
+                datetime.datetime.fromtimestamp(mtime_).strftime(date_format))
             types.append(type_)
             if type_ == 'Folder':
                 size_string.append("--")
             else:
                 size_string.append(size_bytes_to_string(size_))
-            type_icons.append(type_icon)
-            extension_n_char.append(ext_n_char_)
+            type_icons.append(get_type_as_icon_string(new_path, is_dir=is_dir_,
+                                                      extension=extension_))
+            extension_n_char.append(len(extension_))
             size_raw.append(size_)
-            date_modified_raw.append(date_modified_raw_)
-            is_hidden_.append(is_hidden(new_path))
-        except:
-            pass
+            date_modified_raw.append(mtime_)
+            is_hidden_.append(is_hidden_from_stat(x.name, stat_result))
+        except Exception:
+            # Entries that vanish or can't be read mid-listing are dropped, as before - but say so
+            logger.debug(f"get_dataframe_of_file_names_in_directory skipped {new_path}",
+                         exc_info=True)
     df = pd.DataFrame({conf.FILE_EXPLORER_FILENAME_COL_NAME: file_name,
                        'Date modified': date_modified,
                        'Size': size_string,

@@ -2,14 +2,15 @@ import os
 import random
 import time
 from typing import Callable
-from queue import Queue
+from queue import Queue, Empty
 from PySide6.QtGui import Qt
 from PySide6.QtCore import Signal, QThread, QMargins, QTimer, QFileSystemWatcher, QObject
 from PySide6.QtWidgets import QMainWindow, QTableWidget, QTableWidgetItem, QRadioButton, QWidget,\
-    QHBoxLayout, QButtonGroup, QVBoxLayout, QPushButton, QCheckBox, QFrame, QScrollArea, QLabel
-from src.utils.os_utils import move_to_trash, extract_filename_from_path, copy_and_paste_item, \
-    get_all_item_names_in_directory, extract_parent_path_from_path, increment_max_item_name, \
-    delete_item
+    QHBoxLayout, QButtonGroup, QVBoxLayout, QPushButton, QCheckBox, QFrame, QScrollArea, QLabel,\
+    QProgressBar
+from src.utils.os_utils import move_to_trash, extract_filename_from_path, count_tree, \
+    copy_tree_with_progress, get_all_item_names_in_directory, extract_parent_path_from_path, \
+    increment_max_item_name, delete_item, size_bytes_to_string
 from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons
 from src.non_ui_components.user_actions import (UserAction_CopyPasteItemsUsingThread,
                                                 UserAction_MoveFilesUsingThread)
@@ -21,16 +22,29 @@ class PastingManager:
     Orchestrates several pasters (each responsible for a unique thread), and maintains a queue
     of pasting tasks in case all pasters are busy.
     """
+    # A paste finishing faster than this never shows a progress window at all
+    SHOW_PROGRESS_AFTER_MS = 1000
+    # How long app shutdown is willing to wait for in-flight copies to notice they should stop
+    SHUTDOWN_WAIT_MS = 3000
+
     def __init__(self, caller, num_threads: int = 6, sample_every_ms: int = 3000):
         self.caller = caller
         self.paster_objects = {}
         self.update_ui_timers = {}
+        # What show_pending_pasting_process should display, per paster, once its timer fires
+        self._pending_ui_info = {}
         for i in range(num_threads):
             paster_object = PasterObject(self.caller)
             paster_object.pasting_finished.connect(self.pasting_finished)
+            paster_object.progress.connect(self.update_pasting_progress)
             paster_object.id = i
             self.paster_objects[i] = paster_object
-            self.update_ui_timers[i] = QTimer()
+            # Connected once here, not per paste, so the timer stays cancellable and repeated
+            # pastes don't stack up connections
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda paster_id=i: self.show_pending_pasting_process(paster_id))
+            self.update_ui_timers[i] = timer
         self.tasks_queue = []
         self.start_next_queue_timer = QTimer()
         self.start_next_queue_timer.timeout.connect(self.handle_next_task_if_thread_available)
@@ -48,11 +62,24 @@ class PastingManager:
             btn_width=100
             )
 
-    def add_pasting_process_to_ui(self, paster, copied_file_paths, dest_path):
-        if not paster.is_available:
-            self.running_processes_ui.show()
-            num_items = str(len(copied_file_paths))
-            self.running_processes_ui.add_widget(paster.id, f"Pasting {num_items} items to {dest_path}")
+    def show_pending_pasting_process(self, paster_id: int):
+        """
+        Shows the progress row for a paste that is still running SHOW_PROGRESS_AFTER_MS in. Short
+        pastes never get here, because pasting_finished stops the timer first.
+        """
+        info = self._pending_ui_info.pop(paster_id, None)
+        paster = self.paster_objects.get(paster_id)
+        if info is None or paster is None or paster.is_available:
+            return
+        self.running_processes_ui.show()
+        num_items = str(len(info['copied_file_paths']))
+        self.running_processes_ui.add_widget(
+            paster_id, f"Pasting {num_items} items to {info['dest_path']}")
+
+    def update_pasting_progress(self, paster_id: int, files_done: int, files_total: int,
+                                bytes_done: int, bytes_total: int):
+        self.running_processes_ui.update_progress(paster_id, files_done, files_total,
+                                                  bytes_done, bytes_total)
 
     def paste(self,
               copied_file_paths: list[str],
@@ -77,7 +104,9 @@ class PastingManager:
         else:
             # Idle paster found -> use it to paste items
             logger.info("Idle paster found")
-            self.update_ui_timers[available_paster.id].singleShot(1000, lambda: self.add_pasting_process_to_ui(available_paster, copied_file_paths, dest_path))
+            self._pending_ui_info[available_paster.id] = {'copied_file_paths': copied_file_paths,
+                                                          'dest_path': dest_path}
+            self.update_ui_timers[available_paster.id].start(self.SHOW_PROGRESS_AFTER_MS)
             self.paste_using_paster(available_paster,
                                     copied_file_paths, dest_path, delete_source_after_paste,
                                     when_done,
@@ -127,19 +156,28 @@ class PastingManager:
 
     def safetly_kill_all_threads(self):
         logger.info("safetly_kill_all_threads")
-        while len(self.paster_objects) > 0:
-            k = list(self.paster_objects.keys())[0]
-            paster_object = self.paster_objects.pop(k)
-            paster_object.break_thread_run()
+        # Ask everyone to stop first, then wait once - waiting on each in turn would serialise
+        # the timeouts and make quitting take N times as long
+        paster_objects = list(self.paster_objects.values())
+        for paster_object in paster_objects:
+            paster_object.break_thread_run(wait=False)
+        for paster_object in paster_objects:
+            if paster_object.pasting_thread is not None:
+                paster_object.pasting_thread.wait(self.SHUTDOWN_WAIT_MS)
+        self.paster_objects.clear()
 
     def break_pasting_process(self, paster_obj_id: int):
         logger.info(f"break_pasting_process ({paster_obj_id})")
-        self.paster_objects[paster_obj_id].break_thread_run()
-        self.pasting_finished(paster_obj_id)
+        # Only asks the thread to stop; the row is removed when the thread's finished signal
+        # reaches pasting_finished. Removing it here too ran the teardown twice.
+        self.paster_objects[paster_obj_id].break_thread_run(wait=False)
     
     def pasting_finished(self, paster_obj_id: int):
         logger.info(f"pasting_finished ({paster_obj_id})")
-        self.update_ui_timers[paster_obj_id].stop()
+        # Cancels the "show progress after 1s" timer if the paste beat it
+        if paster_obj_id in self.update_ui_timers:
+            self.update_ui_timers[paster_obj_id].stop()
+        self._pending_ui_info.pop(paster_obj_id, None)
         self.running_processes_ui.remove_widget(paster_obj_id)
         if len(self.running_processes_ui.widgets_list) == 0:
             self.running_processes_ui.hide()
@@ -148,6 +186,8 @@ class PastingManager:
 
 class PasterObject(QWidget):
     pasting_finished = Signal(int)
+    # paster id, files_done, files_total, bytes_done, bytes_total
+    progress = Signal(int, int, int, int, int)
 
     """
     Wrapper over a thread which does the actual pasting
@@ -159,6 +199,9 @@ class PasterObject(QWidget):
         self.pasting_thread = None
         self._is_available = True
         self.id = random.randint(0, 1000000)
+        self.dialog = None
+        # Where to place the paste dialogs; set by QDialogPasteExistingItem once one is shown
+        self.position_on_screen = None
 
 
     @property
@@ -170,15 +213,36 @@ class PasterObject(QWidget):
     def lock(self):
         self._is_available = False
 
-    def break_thread_run(self, wait=True):
+    def break_thread_run(self, wait=False):
+        """
+        Asks the copy to stop. Does NOT wait by default - the worker checks the stop flag before
+        every file, and cleanup happens on its finished signal. Waiting here would block the UI
+        thread (this is called from the Cancel button and from app shutdown).
+        """
         if self.pasting_thread is not None:
-            self.pasting_thread._forced_to_stop = True
+            self.pasting_thread.stop()
             if wait:
                 self.pasting_thread.wait()
 
     def _init_pasting_thread(self):
         self.pasting_thread = PasteItemsThread(results_queue = self.queue)
         self.pasting_thread.finished.connect(self.pasting_thread_finished)
+        self.pasting_thread.progress.connect(self._relay_progress)
+
+    def _relay_progress(self, files_done, files_total, bytes_done, bytes_total):
+        self.progress.emit(self.id, files_done, files_total, bytes_done, bytes_total)
+
+    def process_user_response(self, response: str = None, apply_to_all: bool = False):
+        """
+        Called by QDialogPasteExistingItem when the user answers. Name conflicts are already
+        resolved up front by TableWithRadioButtons, so what reaches here is the paste-error
+        acknowledgement - the paster was already released in pasting_thread_finished, so this
+        only has to dismiss the dialog.
+        """
+        logger.info(f"PasterObject.process_user_response ({response})")
+        if self.dialog is not None:
+            self.dialog.close()
+            self.dialog = None
 
     def run(self,
             copied_file_paths: list[str] = [],
@@ -205,6 +269,20 @@ class PasterObject(QWidget):
                                            # and therefore both isRunning and isFinished will
                                            # always return False
 
+    def _take_last_result(self) -> dict:
+        """
+        Reads the worker's result without ever blocking the UI thread. PasteItemsThread always
+        puts exactly one result before run() returns, and `finished` only fires after that, so
+        there is normally one item waiting. Drains anything extra rather than leaving it for the
+        next paste on this paster to pick up.
+        """
+        result = {}
+        while True:
+            try:
+                result = self.queue.get_nowait()
+            except Empty:
+                return result
+
     def pasting_thread_finished(self, thread_id: int = 0):
         logger.info(f"pasting_thread_finished ({thread_id})")
         self.time_finished = time.time()
@@ -212,12 +290,10 @@ class PasterObject(QWidget):
         if self.when_done is not None:
             self.when_done()
 
-        result = self.queue.get()
-        if len(result) == 0:
-            self._is_available = True
-            return
+        result = self._take_last_result()
+        call_type = result.get('call_type')
 
-        if result['call_type'] == 'paste_error':
+        if call_type == 'paste_error':
             item_name = result['item_name']
             self.dialog = QDialogPasteExistingItem(self,
                                                    button_texts=['Ok'],
@@ -229,31 +305,8 @@ class PasterObject(QWidget):
                 self.dialog.move(self.position_on_screen)
             self.dialog.show()
 
-        elif result['call_type'] == 'finished_all':
-            print("result['call_type'] == 'finished_all' ", time.time())
-            self.items_pasted = self.items_pasted + result['items_pasted']
-            if len(self.items_pasted) > 0:
-                if self.delete_source_after_paste:
-                    print("self.caller.keep_last_action - UserAction_MoveFilesUsingThread ", time.time())
-                    self.caller.keep_last_action(
-                        UserAction_MoveFilesUsingThread(self.items_pasted,
-                                                        self.caller))
-                else:
-                    print("self.caller.keep_last_action - UserAction_CopyPasteItemsUsingThread ", time.time())
-                    self.caller.keep_last_action(
-                        UserAction_CopyPasteItemsUsingThread(self.items_pasted,
-                                                             self.caller))
-                print("self.caller.select_pasted_items_where_ui_is_in_path ", time.time())
-                self.caller.select_pasted_items_where_ui_is_in_path(
-                    path = self.dest_path,
-                    items = [extract_filename_from_path(i[1]) for i in self.items_pasted]
-                )
-
-        elif result['call_type'] == 'item_already_exist':
+        elif call_type == 'item_already_exist':
             item_name = result['item_name']
-            # 'items_skipped': items_skipped,
-            # 'items_not_pasted': items_not_pasted,
-            # 'items_pasted': items_pasted})
             self.dialog = QDialogPasteExistingItem(self,
                                                    button_texts=['Skip', 'Replace', 'Keep both'],
                                                    title_text = f'File {item_name} already exists in the destination folder',
@@ -265,6 +318,24 @@ class PasterObject(QWidget):
                 self.dialog.move(self.position_on_screen)
             self.dialog.show()
 
+        # A cancelled paste still pasted whatever it got through before stopping, so it is
+        # recorded for undo exactly like a completed one
+        if call_type in ('finished_all', 'forced_to_stop', 'paste_error'):
+            self.items_pasted = self.items_pasted + result.get('items_pasted', [])
+            if len(self.items_pasted) > 0:
+                if self.delete_source_after_paste:
+                    self.caller.keep_last_action(
+                        UserAction_MoveFilesUsingThread(self.items_pasted,
+                                                        self.caller))
+                else:
+                    self.caller.keep_last_action(
+                        UserAction_CopyPasteItemsUsingThread(self.items_pasted,
+                                                             self.caller))
+                self.caller.select_pasted_items_where_ui_is_in_path(
+                    path = self.dest_path,
+                    items = [extract_filename_from_path(i[1]) for i in self.items_pasted]
+                )
+
         self._is_available = True
         self.pasting_finished.emit(self.id)
 
@@ -274,95 +345,130 @@ class PasteItemsThread(QThread):
     """
     Wrapper which performs the actual pasting of items from source to destination.
     """
+    # files_done, files_total, bytes_done, bytes_total
+    progress = Signal(int, int, int, int)
+
+    # Never emit progress more often than this. One signal per copied file would flood the UI
+    # thread's event queue on a big folder, which is itself a freeze.
+    PROGRESS_INTERVAL_SECONDS = 0.1
+
     def __init__(self,
                  results_queue: Queue = None,  # queue used to send output to the caller class
                  parent=None):
         super().__init__(parent)
         self.results_queue = results_queue
+        self._forced_to_stop = False
 
     def set_run_params(self,
                        source_dest_pairs: list[tuple[str, str, str]],  # [(from, to, when_conflicting), ...]
                        delete_source_after_paste: bool):
         self.source_dest_pairs = source_dest_pairs
         self.delete_source_after_paste = delete_source_after_paste
-
-    def run(self):
+        # Cleared here, not in run(): a cancel arriving between start() and the thread actually
+        # entering run() would otherwise be silently discarded
         self._forced_to_stop = False
 
-        success = 0  # Nothing happened
+    def stop(self):
+        """Asks the copy to abort. Safe to call from the UI thread - it never blocks."""
+        self._forced_to_stop = True
+
+    def run(self):
         items_skipped = []
         items_not_pasted = []
         items_pasted = []
+        result = {'call_type': 'finished_all'}
 
-        for i, d in enumerate(self.source_dest_pairs):
-            # time.sleep(0.3)
-            if self._forced_to_stop:
-                self.results_queue.put({'call_type': 'forced_to_stop',
-                                        'items_skipped': items_skipped,
-                                        'items_not_pasted': items_not_pasted,
-                                        'items_pasted': items_pasted})
-                print("PasteItemsThread.run - 'forced_to_stop' ", time.time())
-                break
+        try:
+            # Sizing pass first, so progress can be reported against a real total. This walks
+            # every source tree, which is exactly why it belongs here and not on the UI thread.
+            files_total = 0
+            bytes_total = 0
+            for src, _dest, _when_conflicting in self.source_dest_pairs:
+                if self._forced_to_stop:
+                    break
+                if os.path.exists(src):
+                    num_files, num_bytes = count_tree(src)
+                    files_total += num_files
+                    bytes_total += num_bytes
 
-            src, dest, when_conflicting = d
-            if not os.path.exists(src):
-                continue
-            filename = extract_filename_from_path(src)
+            self._files_done = 0
+            self._bytes_done = 0
+            self._last_progress_emit = 0.0
+            self.progress.emit(0, files_total, 0, bytes_total)
 
-            # Item with identical name already in destination path
-            if os.path.exists(dest):
-                if when_conflicting == 'skip_item':
-                    print("items_skipped.append((src, dest)) ", time.time())
-                    items_skipped.append((src, dest))
+            def on_file_done(num_bytes: int):
+                self._files_done += 1
+                self._bytes_done += num_bytes
+                now = time.monotonic()
+                if now - self._last_progress_emit >= self.PROGRESS_INTERVAL_SECONDS:
+                    self._last_progress_emit = now
+                    self.progress.emit(self._files_done, files_total,
+                                       self._bytes_done, bytes_total)
+
+            for src, dest, when_conflicting in self.source_dest_pairs:
+                if self._forced_to_stop:
+                    result = {'call_type': 'forced_to_stop'}
+                    break
+
+                if not os.path.exists(src):
                     continue
-                elif when_conflicting == 'keep_both':
-                    # change dest path to indicate duplication
-                    dest_dir = extract_parent_path_from_path(dest)
-                    dest = increment_max_item_name(get_all_item_names_in_directory(dest_dir),
-                                                   extract_parent_path_from_path(dest), filename)
-                elif when_conflicting == 'replace':
-                    print("delete_item ", time.time())
-                    delete_item(dest)
-                # This part should never be reached:
-                else:
-                    self.results_queue.put({'call_type': 'item_already_exist',
-                                            'item_name': dest,
-                                            'items_skipped': items_skipped,
-                                            'items_not_pasted': items_not_pasted,
-                                            'items_pasted': items_pasted})
-                    print("self.results_queue.put - 'item_already_exist' ", time.time())
-                    return
+                filename = extract_filename_from_path(src)
 
-            # Perform the actual pasting
-            if src != dest:
-                print("success = copy_and_paste_item ", time.time())
-                success = copy_and_paste_item(src, dest_item_full_path=dest)
+                # Item with identical name already in destination path
+                if os.path.exists(dest):
+                    if when_conflicting == 'skip_item':
+                        items_skipped.append((src, dest))
+                        continue
+                    elif when_conflicting == 'keep_both':
+                        # change dest path to indicate duplication
+                        dest_dir = extract_parent_path_from_path(dest)
+                        dest = increment_max_item_name(get_all_item_names_in_directory(dest_dir),
+                                                       extract_parent_path_from_path(dest),
+                                                       filename)
+                    elif when_conflicting == 'replace':
+                        delete_item(dest)
+                    # This part should never be reached:
+                    else:
+                        result = {'call_type': 'item_already_exist', 'item_name': dest}
+                        break
 
-            if success >= 0:
-                # self.items_finished.emit()
+                # Perform the actual pasting
+                success = 0  # Nothing happened
+                if src != dest:
+                    success = copy_tree_with_progress(src, dest,
+                                                      should_stop=lambda: self._forced_to_stop,
+                                                      on_file_done=on_file_done)
+
+                if success == -2:
+                    # Cancelled part-way through this item; its partial copy has been removed
+                    result = {'call_type': 'forced_to_stop'}
+                    break
+                elif success == -1:
+                    result = {'call_type': 'paste_error', 'item_name': filename}
+                    break
+
                 if success == 1:
-                    print("items_pasted.append ", time.time())
                     items_pasted.append((src, dest))
                 elif success == 0:
-                    print("items_not_pasted.append ", time.time())
                     items_not_pasted.append((src, dest))
                 if self.delete_source_after_paste:
-                    print("move_to_trash(src) ", time.time())
                     move_to_trash(src)
-                    print("Finished move_to_trash(src) ", time.time())
-            elif success == -1:
-                self.results_queue.put({'call_type': 'paste_error', 'item_name': filename,
-                                        'items_skipped': items_skipped,
-                                        'items_not_pasted': items_not_pasted,
-                                        'items_pasted': items_pasted})
-                print("self.results_queue.put - 'paste_error' ", time.time())
-                return
 
-        self.results_queue.put({'call_type': 'finished_all',
-                                'items_skipped': items_skipped,
-                                'items_not_pasted': items_not_pasted,
-                                'items_pasted': items_pasted})
-        print("self.results_queue.put - 'finished_all' ", time.time())
+            self.progress.emit(self._files_done, files_total, self._bytes_done, bytes_total)
+
+        except Exception:
+            # Without this the `finally` below would be the only thing standing between an
+            # unexpected error and a caller waiting forever for a result
+            logger.exception("PasteItemsThread.run failed")
+            result = {'call_type': 'paste_error',
+                      'item_name': extract_filename_from_path(self.source_dest_pairs[0][0])
+                      if self.source_dest_pairs else ''}
+        finally:
+            # Single writer to the queue, on every exit path
+            result.update({'items_skipped': items_skipped,
+                           'items_not_pasted': items_not_pasted,
+                           'items_pasted': items_pasted})
+            self.results_queue.put(result)
 
 
 
@@ -575,16 +681,43 @@ class SinglePasteProcessUiWidget(QFrame):
         # Create the QLabel for the top-left corner
         label = QLabel(top_text, self)
 
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(16)
+        self.progress_bar.setTextVisible(True)
+
+        self.detail_label = QLabel("", self)
+
         self.button = QPushButton(button_text)
         self.button.setFixedWidth(80)
         self.button.setFixedHeight(20)
         self.button.clicked.connect(self.emitButtonClickedSignal)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(label, 2, Qt.AlignLeft | Qt.AlignTop)
-        layout.addWidget(self.button, 2, Qt.AlignLeft | Qt.AlignBottom)
+        layout.addWidget(label, 0, Qt.AlignLeft | Qt.AlignTop)
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.detail_label, 0, Qt.AlignLeft)
+        layout.addWidget(self.button, 0, Qt.AlignLeft | Qt.AlignBottom)
         layout.setContentsMargins(5, 10, 5, 10)
         self.setLayout(layout)
+
+    def update_progress(self, files_done: int, files_total: int,
+                        bytes_done: int, bytes_total: int):
+        """
+        Plain widget updates on the UI thread, driven by queued signals from the copy thread.
+        Deliberately no processEvents() - that would run a nested event loop.
+        """
+        if bytes_total > 0:
+            percent = int(100 * bytes_done / bytes_total)
+        elif files_total > 0:
+            percent = int(100 * files_done / files_total)
+        else:
+            percent = 0
+        self.progress_bar.setValue(min(100, max(0, percent)))
+        self.detail_label.setText(
+            f"{files_done} of {files_total} files "
+            f"({size_bytes_to_string(bytes_done)} of {size_bytes_to_string(bytes_total)})")
 
     def emitButtonClickedSignal(self):
         self.btn_clicked.emit()
@@ -593,7 +726,7 @@ class SinglePasteProcessUiWidget(QFrame):
 class PastingProcessesUi(QWidget):
     break_pasting_signal = Signal(int)
     
-    def __init__(self, width_per_widget: int = 1000, height_per_widget: int = 80):
+    def __init__(self, width_per_widget: int = 1000, height_per_widget: int = 130):
         super().__init__()
         self.setWindowTitle("Currently running pasting processes")
         self.height_per_widget = height_per_widget
@@ -619,6 +752,14 @@ class PastingProcessesUi(QWidget):
         # Main layout for the window
         self.main_layout = QVBoxLayout(self)
         self.main_layout.addWidget(self.scroll_area)
+
+    def update_progress(self, widget_id: int, files_done: int, files_total: int,
+                        bytes_done: int, bytes_total: int):
+        # No-op until the row exists - progress starts arriving before the 1s show timer fires
+        for w in self.widgets_list:
+            if w.id == widget_id:
+                w.update_progress(files_done, files_total, bytes_done, bytes_total)
+                return
 
     def remove_widget(self, widget_id: int):
         widget_ind_to_remove = [i for i, w in enumerate(self.widgets_list) if w.id == widget_id]

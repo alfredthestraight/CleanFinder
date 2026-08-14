@@ -1,58 +1,7 @@
 from PySide6 import QtWidgets
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QToolBar, QLabel, QCheckBox, QPushButton, QHBoxLayout, \
-    QSplitter, QFileDialog, QWidget, QProgressBar
-
-
-class ProgressBar(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.progress_bar = QProgressBar(self)
-        self.progress_value = 0
-        self.progress_bar.setValue(self.progress_value)
-
-    def update_progress(self, percent_inc, to_percentage=None):
-        if self.progress_value < 100:
-            if to_percentage is not None:
-                self.progress_value = to_percentage
-            else:
-                self.progress_value += percent_inc
-            self.progress_bar.setValue(self.progress_value)
-            QtWidgets.QApplication.instance().processEvents()
-
-
-
-class ProgressBarWrapper(ProgressBar):
-    def __init__(self, caller, header="Copying progress"):
-        super().__init__()
-        self.pasting_thread = caller
-        self.setWindowTitle(header)
-
-        # Create layout
-        self.layout = QHBoxLayout()
-
-        # Create progress bar
-        self.layout.addWidget(self.progress_bar)
-
-        self.label = QLabel()
-        self.label.setText("0%")
-        self.layout.addWidget(self.progress_bar)
-        self.layout.addWidget(self.label)
-
-        # Create button
-        self.button = QPushButton('Cancel', self)
-        if hasattr(caller, 'abort'):
-            self.button.clicked.connect(caller.abort)
-        self.layout.addWidget(self.button)
-
-        self.setLayout(self.layout)
-
-    def update_progress(self, percent_inc):
-        # super().update_progress(percent_inc)
-        val = int(self.progress_value)
-        self.label.setText(f"{val}%")
-        QtWidgets.QApplication.instance().processEvents()
-
+    QSplitter, QFileDialog, QWidget
 
 
 class QFileDialogWithCheckbox(QFileDialog):

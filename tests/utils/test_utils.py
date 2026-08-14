@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch, mock_open, MagicMock
 import os
+import shutil
+import stat
+import tempfile
 os.chdir(os.getcwd().replace('/tests/utils', ''))
 
 from src.utils import os_utils
@@ -148,8 +151,8 @@ class TestOsUtils(unittest.TestCase):
         with patch('os_utils.Path.is_dir', return_value=False):
             self.assertEqual(os_utils.get_type_as_icon_string('test.txt'), 'file_icon')
 
-    @patch('os_utils.os.path.getctime', return_value=1609459200)
-    def test_get_item_date_modified(self, mock_getctime):
+    @patch('os_utils.os.path.getmtime', return_value=1609459200)
+    def test_get_item_date_modified(self, mock_getmtime):
         self.assertEqual(os_utils.get_item_date_modified('test.txt'), '2021-01-01 00:00:00')
 
     @patch('os.path.exists', return_value=True)
@@ -185,6 +188,143 @@ class TestOsUtils(unittest.TestCase):
     #     mock_run.return_value.returncode = 0
     #     self.assertEqual(os_utils.open_application('/Applications/Safari.app'), 1)
     #     mock_run.assert_called_once_with(['open', '/Applications/Safari.app'], check=True)
+
+class TestCopyPrimitives(unittest.TestCase):
+    """
+    count_tree / copy_tree_with_progress back the pasting thread. They exist so a paste can be
+    stopped part-way and can report progress - shutil.copytree can do neither.
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp()
+        self.src = os.path.join(self.base, 'src')
+        os.makedirs(os.path.join(self.src, 'sub', 'deeper'))
+        for i in range(5):
+            with open(os.path.join(self.src, f'f{i}.txt'), 'w') as f:
+                f.write('x' * 10)
+        for i in range(3):
+            with open(os.path.join(self.src, 'sub', f'g{i}.txt'), 'w') as f:
+                f.write('y' * 20)
+        with open(os.path.join(self.src, 'sub', 'deeper', 'h.txt'), 'w') as f:
+            f.write('z' * 30)
+        # 5*10 + 3*20 + 30 = 140 bytes across 9 files
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def test_count_tree_counts_files_and_bytes_recursively(self):
+        self.assertEqual(os_utils.count_tree(self.src), (9, 140))
+
+    def test_count_tree_of_a_single_file(self):
+        self.assertEqual(os_utils.count_tree(os.path.join(self.src, 'f0.txt')), (1, 10))
+
+    def test_copy_reproduces_the_whole_tree(self):
+        dest = os.path.join(self.base, 'dest')
+        self.assertEqual(os_utils.copy_tree_with_progress(self.src, dest), 1)
+        self.assertTrue(os.path.exists(os.path.join(dest, 'sub', 'deeper', 'h.txt')))
+        self.assertEqual(os_utils.count_tree(dest), (9, 140))
+
+    def test_copy_reports_every_file_it_copied(self):
+        dest = os.path.join(self.base, 'dest')
+        reported = []
+        os_utils.copy_tree_with_progress(self.src, dest, on_file_done=reported.append)
+        self.assertEqual(len(reported), 9)
+        self.assertEqual(sum(reported), 140)
+
+    def test_copy_of_a_single_file(self):
+        dest = os.path.join(self.base, 'one.txt')
+        self.assertEqual(
+            os_utils.copy_tree_with_progress(os.path.join(self.src, 'f0.txt'), dest), 1)
+        self.assertTrue(os.path.exists(dest))
+
+    def test_abort_mid_tree_removes_the_partial_destination(self):
+        dest = os.path.join(self.base, 'dest')
+        calls = {'n': 0}
+
+        def should_stop():
+            calls['n'] += 1
+            return calls['n'] > 2
+
+        self.assertEqual(
+            os_utils.copy_tree_with_progress(self.src, dest, should_stop=should_stop), -2)
+        self.assertFalse(os.path.exists(dest),
+                         'a cancelled copy must not leave half a folder behind')
+
+    def test_abort_before_the_first_file_still_aborts(self):
+        dest = os.path.join(self.base, 'dest')
+        self.assertEqual(
+            os_utils.copy_tree_with_progress(self.src, dest, should_stop=lambda: True), -2)
+
+    def test_missing_source_is_an_error(self):
+        self.assertEqual(
+            os_utils.copy_tree_with_progress(os.path.join(self.base, 'nope'),
+                                             os.path.join(self.base, 'dest')), -1)
+
+    def test_identical_source_and_destination_does_nothing(self):
+        self.assertEqual(os_utils.copy_tree_with_progress(self.src, self.src), 0)
+
+    def test_unreadable_file_reports_an_error_without_raising(self):
+        unreadable = os.path.join(self.src, 'f0.txt')
+        os.chmod(unreadable, 0o000)
+        try:
+            dest = os.path.join(self.base, 'dest')
+            self.assertEqual(os_utils.copy_tree_with_progress(self.src, dest), -1)
+        finally:
+            os.chmod(unreadable, 0o644)
+
+
+class TestIsHiddenFromStat(unittest.TestCase):
+    """
+    is_hidden_from_stat replaces a Launch Services round trip per item when listing a directory,
+    so it has to agree with the NSURL-based is_hidden it stands in for.
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def test_dotfile_is_hidden(self):
+        path = os.path.join(self.base, '.hidden')
+        with open(path, 'w') as f:
+            f.write('x')
+        self.assertTrue(os_utils.is_hidden_from_stat('.hidden', os.stat(path)))
+        self.assertEqual(bool(os_utils.is_hidden(path)),
+                         os_utils.is_hidden_from_stat('.hidden', os.stat(path)))
+
+    def test_ordinary_file_is_not_hidden(self):
+        path = os.path.join(self.base, 'visible.txt')
+        with open(path, 'w') as f:
+            f.write('x')
+        self.assertFalse(os_utils.is_hidden_from_stat('visible.txt', os.stat(path)))
+        self.assertEqual(bool(os_utils.is_hidden(path)),
+                         os_utils.is_hidden_from_stat('visible.txt', os.stat(path)))
+
+    def test_uf_hidden_flag_is_honoured(self):
+        path = os.path.join(self.base, 'flagged.txt')
+        with open(path, 'w') as f:
+            f.write('x')
+        os.chflags(path, stat.UF_HIDDEN)
+        try:
+            self.assertTrue(os_utils.is_hidden_from_stat('flagged.txt', os.stat(path)))
+            self.assertEqual(bool(os_utils.is_hidden(path)),
+                             os_utils.is_hidden_from_stat('flagged.txt', os.stat(path)))
+        finally:
+            os.chflags(path, 0)
+
+
+class TestExtractExtensionFromName(unittest.TestCase):
+
+    def test_matches_extract_extension_from_path_for_files(self):
+        for name in ['notes.txt', 'archive.tar.gz', 'noextension', '.bashrc']:
+            self.assertEqual(os_utils.extract_extension_from_name(name),
+                             os_utils.extract_extension_from_path(name),
+                             f'disagreed on {name}')
+
+    def test_no_dot_means_no_extension(self):
+        self.assertEqual(os_utils.extract_extension_from_name('README'), '')
+
 
 if __name__ == '__main__':
     unittest.main()

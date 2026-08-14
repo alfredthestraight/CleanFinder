@@ -52,7 +52,9 @@ class PastingDelegate:
                     rename_item_names_in_dest = rename_item_names_in_dest)
 
     def get_pasting_conflicts(self, dest_path: str, copied_file_paths: list[str]):
-        items_in_dest = get_all_items_in_path(dest_path)
+        # set(), not the list get_all_items_in_path returns: pasting M items into a folder holding
+        # N of them is O(M*N) string comparisons on the UI thread with a list
+        items_in_dest = set(get_all_items_in_path(dest_path))
         items_to_paste = [os.path.basename(x) for x in copied_file_paths]
         return [x for x in items_to_paste if x in items_in_dest]
 
@@ -81,10 +83,14 @@ class PastingDelegate:
                                   p[2])
                                  for p in source_dest_pairs]
 
+        # Only the source and destination directories change, so don't re-read every open pane
+        affected_paths = [dest_path] + [extract_parent_path_from_path(f) for f in copied_file_paths]
+
         self.pasting_manager.paste(copied_file_paths=copied_file_paths,
                                    dest_path=dest_path,
                                    delete_source_after_paste=delete_source_after_paste,
-                                   when_done=self.ui_manager.refresh_all_uis,
+                                   when_done=lambda: self.ui_manager.refresh_all_uis(
+                                       paths=affected_paths),
                                    source_dest_pairs=source_dest_pairs,
                                    )
 
@@ -141,10 +147,18 @@ class UiWindowManager(QMainWindow):
                                             is_ascending_per_col[columns_sorting_order[s]]))
         return columns_sorting_mapping
 
-    def refresh_all_uis(self):
+    def refresh_all_uis(self, paths: list[str] = None):
+        """
+        Re-reads directory contents into the tables. Each refresh is a full directory re-read on
+        the UI thread, so pass `paths` when the caller knows which directories actually changed
+        (e.g. a paste only affects its source and destination) instead of re-reading every pane
+        of every open window.
+        """
+        paths_to_refresh = None if paths is None else set(paths)
         for w in self.windows:
             for t in w.all_tables():
-                t._refresh_source_data()
+                if paths_to_refresh is None or t.path in paths_to_refresh:
+                    t._refresh_source_data()
 
     def reload_keyboard_shortcuts(self):
         for w in self.windows:

@@ -11,9 +11,11 @@ from src.ui_components.misc_widgets.links_table import LinksTable
 from src.ui_components.misc_widgets.tree_file_explorer import TreeFileExplorer
 from src.ui_components.misc_widgets.misc_widgets import CustomSizeQSplitter, CustomSizeQToolBar
 from src.ui_components.misc_widgets.menu_bar import MebuBarManager
+from src.ui_components.misc_widgets.dialogs_and_messages import prompt_message
 from src.shared.vars import conf_manager as conf, logger as logger
 
-from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path, dir_
+from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path, dir_, \
+    is_reachable_path
 from src.data_models import PandasModel
 from src.utils.utils import get_full_icon_path, create_qaction_key_sequence
 from src.ui_components.file_explorer_table import FileExplorerTable
@@ -44,6 +46,22 @@ class TextboxNavigator(CustomSizeQToolBar):
         self.default_height = default_height
         self.setStyleSheet(conf.TEXTBOX_NAVIGATOR_STYLE)
         logger.info("ui.TextboxNavigator - finished initializing")
+
+    def mousePressEvent(self, event):
+        """
+        Treats the toolbar's own padding as empty area. The path buttons only occupy a
+        short, vertically-centered strip, so the space above/below them (and the margin
+        inside the border) used to swallow clicks; now it behaves like clicking past the
+        last button. The path buttons consume their own presses so they never reach here,
+        and the separator QLabels don't accept mouse events, so clicks on them propagate
+        up to this handler. Fires on press rather than release, to match the expanding
+        empty-area button which is wired to `pressed`.
+        """
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.method_when_clicked_on_empty_area()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def update_fonts(self):
         if hasattr(self, 'toolbar_buttons'):
@@ -303,6 +321,9 @@ class ui(QtWidgets.QMainWindow):
 
         for pane in self.panes:
             pane.navigator.update_path(pane.table.path)
+        # Titled from the pane's real path rather than conf.DEFAULT_PATH, since a window
+        # can be opened at an arbitrary root (e.g. `open -a CleanFinder <path>`).
+        self.update_window_title(self.panes[0].table.path)
 
         self.setAcceptDrops(True)
         self.splitter.setAcceptDrops(True)
@@ -355,7 +376,7 @@ class ui(QtWidgets.QMainWindow):
         except ValueError:
             return
         # Reflect the newly-active pane in the shared window chrome
-        self.splitter.setWindowTitle(get_last_part_in_path(pane.table.path))
+        self.update_window_title(pane.table.path)
         self.refresh_bottom_toolbar_text(pane.table)
 
     def set_active_pane_by_table(self, table):
@@ -409,8 +430,19 @@ class ui(QtWidgets.QMainWindow):
         return QSize(self.left_pane_width + num_panes * self.file_explorer_width + 50,
                      self.height)
 
+    def update_window_title(self, path: str):
+        """
+        Titles the window after the folder it is showing, so each open window is
+        distinguishable in the Dock/Mission Control previews and the window menu.
+        Must be set on the QMainWindow itself: this used to be set on `self.splitter`,
+        but setCentralWidget() reparents the splitter, and a non-top-level widget's
+        windowTitle never reaches the native window - leaving every window titled with
+        the app name. `Path('/').name` is empty, so the root dir falls back to its
+        separator rather than an empty title.
+        """
+        self.setWindowTitle(get_last_part_in_path(path) or path)
+
     def configure_splitter(self):
-        self.splitter.setWindowTitle(get_last_part_in_path(conf.DEFAULT_PATH))
         # Take care of the horizontal lines separating the different widgets within the subsplitter
         self.splitter.setHandleWidth(5)  # The gap size between the textbox and the table
         self.splitter.setStyleSheet(conf.GAP_BETWEEN_TOOLBAR_AND_BELOW_STYLE)
@@ -619,7 +651,7 @@ class ui(QtWidgets.QMainWindow):
         if source_table is self.file_explorer:
             if reset_tree_selection:
                 self.tree.clearSelection()
-            self.splitter.setWindowTitle(get_last_part_in_path(new_path))
+            self.update_window_title(new_path)
             self.refresh_bottom_toolbar_text(source_table)
 
     def refresh_bottom_toolbar_text(self, source_table=None, num_items_selected: int = None,
@@ -722,6 +754,16 @@ class ui(QtWidgets.QMainWindow):
         logger.info(">> ui.favs_table_clicked")
         self.favs_table_view.clearSelection()
         target_path = self.favs_table_view.path_at_row(index.row())
+        # A bookmark can point at a volume that is no longer mounted, or at one whose
+        # server has gone away without the mount being torn down. The latter answers
+        # stat() only after a multi-minute kernel timeout, which would freeze the
+        # window, so refuse to navigate rather than block on it.
+        if not is_reachable_path(target_path):
+            logger.warning("favs_table_clicked: '" + str(target_path) + "' is unreachable")
+            prompt_message("Unavailable location",
+                           "'" + str(target_path) + "' is not available.\n"
+                           "The volume may be disconnected or no longer responding.")
+            return
         self.change_path(target_path, reset_path_history=False)
 
     def launch_search_window(self):

@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import pickle, os, shutil
 from PySide6 import QtWidgets
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtCore import Signal, QThread, Qt
 from PySide6.QtWidgets import QFileDialog, QWidget,QLineEdit, QMainWindow, QLabel, QStackedWidget
 from src.utils.os_utils import get_all_item_names_in_directory, delete_item, get_file_icon, \
     copy_all_files_from_to, get_all_items_in_path, extract_extension_from_path, create_file, \
@@ -16,6 +16,9 @@ from src.shared.locations import APPLICATION_DIRECTORIES
 
 fonts_dir = '/System/Library/Fonts'
 default_font = 'SegoeUI.TTF'
+
+# Text size on the one-off installation screens
+INSTALLATION_FONT_POINT_SIZE = 16
 COMMONLY_USED_EXTENSIONS = \
 [
  # Text
@@ -330,7 +333,14 @@ class InstallationUiWidget(QMainWindow):
         super().__init__()
         self.on_ok_callback = on_ok_callback
         self.w = QWidget()
-        self.setWindowTitle("Setup")
+        self.setWindowTitle("CleanFinder installation")
+
+        # A little larger than the app's normal text - this is a one-off setup screen with very
+        # little on it. Applied per widget rather than once on the window: these pages are built
+        # before they are reparented into the window, so they don't inherit its font.
+        self.installation_font = self.font()
+        self.installation_font.setPointSize(INSTALLATION_FONT_POINT_SIZE)
+        self.setFont(self.installation_font)
 
         self.installing_now_w = self.create_installing_now_widget()
         self.installation_complete_w = self.create_installation_complete_widget()
@@ -354,18 +364,31 @@ class InstallationUiWidget(QMainWindow):
 
     def create_installing_now_widget(self):
         installing_now = QWidget()
-        installing_now_text = QLabel(installing_now)
-        installing_now_text.setText("Installing. This may take a few minutes...")
+        # The label used to be parented straight onto the widget with no layout, so it sat in the
+        # top-left corner at its own size. A layout lets it fill the page, and AlignCenter then
+        # centers the text both horizontally and vertically.
+        installing_now.setStyleSheet("QWidget { background-color: white; }")
+        installing_now_text = QLabel("Installing. This may take a few minutes...")
+        installing_now_text.setFont(self.installation_font)
+        installing_now_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout = QtWidgets.QVBoxLayout(installing_now)
+        layout.addWidget(installing_now_text)
         return installing_now
 
     def create_installation_complete_widget(self):
         installation_complete = QWidget()
+        # Scoped to this widget by object name, so it doesn't repaint the buttons inside it -
+        # a bare `QWidget { ... }` selector would apply to every child widget too
+        installation_complete.setObjectName("installation_complete_page")
+        installation_complete.setStyleSheet(
+            "QWidget#installation_complete_page { background-color: white; }")
         overall_layout = QtWidgets.QVBoxLayout()
         selection_layout = QtWidgets.QHBoxLayout()
 
         self.user_msg = QLabel(self)
         self.user_msg.setText("Please select a default root directory (you could change this at a later\ntime via the settings)")
         self.user_msg.setStyleSheet("QLabel { color : rgb(50, 50, 50);}")
+        self.user_msg.setFont(self.installation_font)
         overall_layout.addWidget(self.user_msg)
 
         path_selection_btn = QtWidgets.QPushButton(self)
@@ -375,17 +398,23 @@ class InstallationUiWidget(QMainWindow):
             self.text_input.setText(desktop_path)
         else:
             self.text_input.setPlaceholderText("/MyPath")
-        path_selection_btn.setText("Select")
+        path_selection_btn.setText("...")
+        path_selection_btn.setFont(self.installation_font)
+        path_selection_btn.setFixedWidth(50)
         self.text_input.setStyleSheet("QLineEdit {background-color : white;}")
+        self.text_input.setFont(self.installation_font)
 
         self.accept_btn = QtWidgets.QPushButton(self)
         self.accept_btn.setText("Use selected path")
-        self.accept_btn.setFixedWidth(150)
+        self.accept_btn.setFont(self.installation_font)
+        # Wide enough for the label at the larger font
+        self.accept_btn.setFixedWidth(180)
         self.accept_btn.setStyleSheet("QPushButton {background-color: rgb(0, 150, 250);"
                                       "border-color: white; color: white;}")
 
-        selection_layout.addWidget(path_selection_btn)
+        # Textbox first, browse button to its right
         selection_layout.addWidget(self.text_input)
+        selection_layout.addWidget(path_selection_btn)
         overall_layout.addLayout(selection_layout)
         overall_layout.addWidget(self.accept_btn)
 

@@ -188,6 +188,13 @@ class ConfigurationsManager:
         self.MULTISELECT_MODIFIER = self.config.get("MULTISELECT_MODIFIER", "option")
         self.PAGE_DOWN_UP_NUM_ROWS = self.config["PAGE_DOWN_UP_NUM_ROWS"]
         self.DEFAULT_TEXT_INDENT = self.config["DEFAULT_TEXT_INDENT"]
+        # How long to wait after a filesystem change before re-reading the directory. A single
+        # paste/delete can fire hundreds of change notifications; the wait collapses them into
+        # one refresh instead of one full directory re-read per changed item.
+        try:
+            self.REFRESH_DEBOUNCE_MS = max(0, int(self.config.get("REFRESH_DEBOUNCE_MS", 200)))
+        except (TypeError, ValueError):
+            self.REFRESH_DEBOUNCE_MS = 200
 
 
 
@@ -388,6 +395,7 @@ class ConfigurationsManager:
             "NEW_FOLDER_NAME_TEMPLATE": "New Folder",
             "MULTISELECT_MODIFIER": "option",
             "PAGE_DOWN_UP_NUM_ROWS": 10,
+            "REFRESH_DEBOUNCE_MS": 200,
             "DEFAULT_TEXT_INDENT": 1,
             "FAVORITES_TITLE": "Bookmarks",
             "SHOW_FAVORITES_TITLE": "Y",
@@ -544,6 +552,12 @@ class ConfigurationsManager:
                 datetime.datetime.today().strftime(str(new_att_value))
             except:
                 pass
+        elif att == 'REFRESH_DEBOUNCE_MS':
+            # QTimer.start() needs an int, but the config dialog can hand back a string
+            try:
+                new_att_value = max(0, int(new_att_value))
+            except (TypeError, ValueError):
+                return
         elif att in self.rgb_attribute_names:
             if not is_string_rgb(new_att_value):
                 pass
@@ -605,6 +619,7 @@ class ConfigurationsManager:
             {"config_keys_path": ["NEW_FOLDER_NAME_TEMPLATE"], "display_text": "New folder name template"},
             {"config_keys_path": ["MULTISELECT_MODIFIER"], "display_text": "Multiselect modifier key (command / control / option / shift)"},
             {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
+            {"config_keys_path": ["REFRESH_DEBOUNCE_MS"], "display_text": "Delay (ms) before refreshing a folder after it changes on disk"},
             {"config_keys_path": ["FOLDERS_ALWAYS_ABOVE_FILES"], "display_text": "Alywas show folders above files"},
             {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
             {"config_keys_path": ["DUAL_PANE_MODE"], "display_text": "Dual pane mode - two panes side by side (Y/N, applies to new windows)"},

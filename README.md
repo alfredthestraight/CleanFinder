@@ -15,6 +15,7 @@ Currently supports Sonoma, and (though a bit buggy) Sequoia
 
 # To wrap the project using py2app (assuming it's already installed):
 
+
 **python py2app_setup.py py2app**
 
 ### Issues that may arise when trying to use py2app in order to compile the project:
@@ -40,11 +41,28 @@ bundled resources, the `com.cleanfinder.app` bundle identifier, and the
 `--add-data`: PyInstaller ignores build options when given a `.spec`, and passing
 them as bare arguments breaks the build.
 
+## The short way
+
+`install_app.sh` does the build and all the install/registration steps below:
+
+**./install_app.sh --build**
+
+Leave off `--build` to install whatever is already in `dist/`. Other flags:
+`--no-open` (don't launch at the end), `--keep-finder` (don't restart Finder),
+`--force` (install even if `/Applications/CleanFinder.app` has an unexpected bundle
+identifier), `--help`.
+
+Unlike the manual `cp -R` below, the script **deletes** the installed bundle before
+copying. `cp -R dist/CleanFinder.app /Applications/` *merges* into an existing
+bundle, so files from older builds survive in the installed app.
+
+## The manual steps
+
 Run these as **separate** commands (no backslash chaining):
 
 **pyinstaller --noconfirm CleanFinder.spec**
 
-Then, to install it and register the "Open in CleanFinder" macOS Service (right-click
+Then, to register the "Open in CleanFinder" macOS Service (right-click
 a file/folder in Finder → Services):
 
 **cp -R dist/CleanFinder.app /Applications/**

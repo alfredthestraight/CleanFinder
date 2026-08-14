@@ -191,7 +191,7 @@ class PropertiesWindowSingleItem(PropertiesWindowCalculateSizeInThread):
             file_type = get_file_type(item)
         location = os.sep.join(item.split(os.sep)[:-1])
         creation_time = \
-            datetime.datetime.fromtimestamp(os.path.getctime(item)).strftime(conf.DATE_FORMAT)
+            datetime.datetime.fromtimestamp(os.stat(item).st_birthtime).strftime(conf.DATE_FORMAT)
         last_modified_time = \
             datetime.datetime.fromtimestamp(os.path.getmtime(item)).strftime(conf.DATE_FORMAT)
         last_access_time = \
