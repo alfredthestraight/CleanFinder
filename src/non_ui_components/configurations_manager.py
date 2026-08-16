@@ -859,8 +859,8 @@ class ConfigurationsManager:
                     background-color: transparent;
                     padding-right: 0px;
                     padding-left: 0px;
-                    padding-top: 0px;
-                    padding-bottom: 0px;
+                    padding-top: 2px;
+                    padding-bottom: 3px;
                     color: black;   /* Font color */
                 }
                 QPushButton:pressed {

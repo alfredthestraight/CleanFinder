@@ -6,7 +6,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('resources', 'resources')],
-    hiddenimports=[],
+    # TEMPORARY: debug_instrumentation is the "window jumps to top-left" harness.
+    # Remove once that bug is found.
+    hiddenimports=['debug_instrumentation'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
