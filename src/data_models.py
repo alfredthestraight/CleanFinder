@@ -293,6 +293,12 @@ class MiscItemsTable(QtCore.QAbstractTableModel):
         self.beginResetModel()
 
         ind = list(self._data.index)
+        # A drop on the empty space below the last row gives an invalid QModelIndex,
+        # whose row() is -1. Treat that (and any out-of-range row) as "move to the end";
+        # left as-is, the negative number would be read as a from-the-end slice bound
+        # below and duplicate rows instead of reordering them.
+        if to_row < 0 or to_row >= len(ind):
+            to_row = len(ind) - 1
         if from_row < to_row:
             ind = ind[0:from_row] + ind[from_row+1:to_row+1] + [ind[from_row]] + ind[to_row+1:]
         elif from_row > to_row:
