@@ -73,6 +73,12 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         self.customContextMenuRequested.connect(self.contextMenuEvent)
         self.index_right_clicked_on = None
 
+        # Drag & drop of files coming from a file-explorer table: the row those files would
+        # be moved into (-1 = none), and the dragged files, resolved once when the drag enters
+        # so that dragMoveEvent doesn't hit the filesystem on every mouse move.
+        self._drop_target_row = -1
+        self._dragged_file_paths = []
+
     def moveCursor(self, cursorAction, modifiers):
         # Keep arrow-key navigation on the column that holds the visible item text
         # (e.g. "Desktop", "Downloads"), so selection never lands on the empty spacer
@@ -84,11 +90,43 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         return index
 
     def dragMoveEvent(self, e):
+        # Highlight the favorite the dragged files would be moved into
+        self._set_drop_target_row(
+            self._drop_target_row_at(e.position().toPoint()) if self._dragged_file_paths else -1)
         e.accept()
 
     def dragEnterEvent(self, event):
+        source = event.source()
+        paths = getattr(source, 'selected_items_paths', None) if source is not self else None
+        # Only files are moved into a favorite; folders keep being added to the favorites list
+        self._dragged_file_paths = [p for p in (paths or []) if not is_dir(p)]
         event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_target_row(-1)
+        self._dragged_file_paths = []
+        super().dragLeaveEvent(event)
+
+    def _drop_target_row_at(self, pos) -> int:
+        """The row of the favorite under `pos`, or -1 if files can't be moved into it (the
+        cursor is below the last item, or the row has no real folder behind it - as is the
+        case for the "Bookmarks" title row, whose Path is None)."""
+        row = self.indexAt(pos).row()
+        if row < 0:
+            return -1
+        path = self.path_at_row(row)
+        return row if path and is_dir(path) else -1
+
+    def _set_drop_target_row(self, row: int):
+        if row == self._drop_target_row:
+            return
+        self._drop_target_row = row
+        self.table.drop_target_row = row
+        # The between-rows insertion line means "reorder"; don't show it while the highlight
+        # says "drop into this folder"
+        self.setDropIndicatorShown(row < 0)
+        self.viewport().update()
 
     def startDrag(self, supportedActions):
         # Get the selected indexes and create the mime data
@@ -109,8 +147,19 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         drag.exec(Qt.DropAction.MoveAction)
 
     def dropEvent(self, event):
+        target_row = self._drop_target_row
+        dragged_files = self._dragged_file_paths
+        self._set_drop_target_row(-1)
+        self._dragged_file_paths = []
+
         source_model, target_model, selected_indexes = super(LinksTable, self).dropEvent(event)
         if source_model is not None:
+            # Files dropped on a favorite are moved into the folder it points to. Folders fall
+            # through to the loop below, which adds them to the favorites list (appendRow
+            # ignores anything that isn't a directory).
+            if target_row >= 0 and dragged_files:
+                event.acceptProposedAction()
+                self.move_files_into_favorite(target_row, dragged_files)
             if selected_indexes:
                 for index in selected_indexes:
                     if index.isValid():
@@ -128,6 +177,16 @@ class LinksTable(DragAndDropFunctionality, QTableView):
             self.update_config_file_favorites_dict()
         else:
             super().dropEvent(event)
+
+    def move_files_into_favorite(self, row: int, file_paths: list[str]):
+        dest_path = self.path_at_row(row)
+        # A file dropped on the favorite of its own folder should do nothing. Without this,
+        # paste_items would treat source == destination as a "keep both" request and duplicate it.
+        file_paths = [p for p in file_paths if extract_parent_path_from_path(p) != dest_path]
+        if not file_paths or self.encompassing_ui is None:
+            return
+        self.encompassing_ui.encompassing_uis_manager.paste_items(
+            dest_path=dest_path, source_paths=file_paths, delete_source_after_paste=True)
 
     def contextMenuEvent(self, event):
         contextMenu = QMenu(self)

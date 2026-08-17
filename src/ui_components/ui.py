@@ -574,7 +574,8 @@ class ui(QtWidgets.QMainWindow):
         self.favs_table_view_layout = QHBoxLayout()
         self.favs_table_view = LinksTable(conf.BASIC_FAVORITES_DICT,
                                           row_height=conf.FAVORITES_ROW_HEIGHT,
-                                          spacer_column_indent=4)
+                                          spacer_column_indent=4,
+                                          encompassing_ui=self)
         self.favs_table_view.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
         num_rows = min([5, self.favs_table_view.table.rowCount(0)])
         max_hght = int(round(num_rows * self.favs_table_view.rowHeight(0) * 3.0, 0))

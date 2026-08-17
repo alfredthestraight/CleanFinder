@@ -244,6 +244,9 @@ class MiscItemsTable(QtCore.QAbstractTableModel):
         self.columns = self._data.columns.values
         self._path = ''
         self.spacer_column_indent = spacer_column_indent
+        # The row a dragged file is currently hovering over (-1 = none). Set by the view
+        # (LinksTable) while dragging, so that row is painted as the drop target.
+        self.drop_target_row = -1
 
     def flags(self, index):
         return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled
@@ -263,6 +266,12 @@ class MiscItemsTable(QtCore.QAbstractTableModel):
             if index.column() == self.FAVORITES_FILENAME_COLUMN_INDEX:
                 item_icon = self._data.iloc[index.row(), :]['icon_full_path']
                 return QtGui.QIcon(item_icon)
+
+        # The row a dragged file will be moved into, highlighted while the drag is over it
+        if role == Qt.ItemDataRole.BackgroundRole and index.row() == self.drop_target_row:
+            return QtGui.QBrush(QColor.fromRgb(conf.FILE_EXPLORER_DRAGGED_ROW_HOVER_R,
+                                               conf.FILE_EXPLORER_DRAGGED_ROW_HOVER_G,
+                                               conf.FILE_EXPLORER_DRAGGED_ROW_HOVER_B))
 
     def rowCount(self, index):
         # The length of the outer list.
