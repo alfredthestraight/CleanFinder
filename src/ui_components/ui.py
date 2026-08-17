@@ -17,7 +17,7 @@ from src.shared.vars import conf_manager as conf, logger as logger
 from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path, dir_, \
     is_reachable_path
 from src.data_models import PandasModel
-from src.utils.utils import get_full_icon_path, create_qaction_key_sequence
+from src.utils.utils import get_full_icon_path, create_qaction_key_sequence, enable_home_end_keys
 from src.ui_components.file_explorer_table import FileExplorerTable
 
 class TextboxNavigator(CustomSizeQToolBar):
@@ -169,6 +169,7 @@ def create_textbox(parent):
     textbox.setText(conf.DEFAULT_PATH)
     textbox.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
     textbox.setStyleSheet(conf.TEXTBOX_STYLE)
+    enable_home_end_keys(textbox)
     return textbox
 
 

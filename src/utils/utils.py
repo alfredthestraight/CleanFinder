@@ -172,6 +172,35 @@ def create_qaction_key_sequence(obj, key_sequence: str, when_triggered: Callable
     return newTableAction
 
 
+def move_cursor_on_home_end_key(line_edit, event) -> bool:
+    """Home / End move the caret to the start / end of the text, with Shift extending the
+    selection. macOS binds these two keys to start/end-of-document, which QLineEdit doesn't
+    implement (it only handles start/end-of-line, bound to Cmd+Left / Cmd+Right), so without
+    this both keys do nothing at all. Returns True if the key was handled."""
+    if event.key() not in (Qt.Key.Key_Home, Qt.Key.Key_End):
+        return False
+    extend_selection = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+    if event.key() == Qt.Key.Key_Home:
+        line_edit.home(extend_selection)
+    else:
+        line_edit.end(extend_selection)
+    return True
+
+
+class HomeEndKeysEventFilter(QtCore.QObject):
+    def eventFilter(self, source, event):
+        if (event.type() == QtCore.QEvent.Type.KeyPress and
+                move_cursor_on_home_end_key(source, event)):
+            return True
+        return super().eventFilter(source, event)
+
+
+def enable_home_end_keys(line_edit):
+    """Give a QLineEdit working Home / End keys. The filter is parented to the line edit, so it
+    lives exactly as long as the widget does."""
+    line_edit.installEventFilter(HomeEndKeysEventFilter(line_edit))
+
+
 def map_key_to_new_row_num(key_id: int, caller_widget) -> int:
     is_currently_selected = len(caller_widget.selectedIndexes()) > 0
     if is_currently_selected:

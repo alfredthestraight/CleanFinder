@@ -7,6 +7,7 @@ import os
 import time
 import pandas as pd
 from src.utils.os_utils import run_file_in_terminal
+from src.utils.utils import enable_home_end_keys
 from src.data_models import SimplePandasModel
 from src.shared.vars import conf_manager as conf
 
@@ -91,6 +92,7 @@ class SearchWindow_threaded(QDialog):
             border:  1px solid lightgrey;
             };""")
         self.search_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        enable_home_end_keys(self.search_box)
         self.search_layout.addWidget(self.search_box)
 
         # Results:
