@@ -108,6 +108,24 @@ class numeric_value_changed:
                                         value, Qt.ItemDataRole.EditRole)
 
 
+class _IgnoreWheelMixin:
+    """Spin boxes in the configure-styles list sit inside a scrollable table, where Qt's
+    default of stepping the value on every wheel tick means scrolling the list silently
+    edits a setting. Ignoring the event stops that, and (per QWidget::wheelEvent's
+    contract) hands the tick to the table underneath so the list scrolls instead."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class NoWheelSpinBox(_IgnoreWheelMixin, QSpinBox):
+    pass
+
+
+class NoWheelDoubleSpinBox(_IgnoreWheelMixin, QDoubleSpinBox):
+    pass
+
+
 class ConfigDropdownDelegate(QStyledItemDelegate):
     """Item delegate for the "Value" column of the configure-styles table: cells for
     known fixed-choice settings edit via a dropdown instead of a free-text line edit.
@@ -371,7 +389,7 @@ class MebuBarManager(QMainWindow):
             value_type = self.config_data.loc[i, 'value_type']
             if value_type not in ('int', 'float'):
                 continue
-            spin = QSpinBox() if value_type == 'int' else QDoubleSpinBox()
+            spin = NoWheelSpinBox() if value_type == 'int' else NoWheelDoubleSpinBox()
             spin.setMinimum(0)  # Values below 0 are not allowed
             spin.setMaximum(999999)
             spin.setValue(self.config_data.iloc[i, 2])
