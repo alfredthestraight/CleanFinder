@@ -5,15 +5,17 @@ import pandas as pd
 
 from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel, QFileDialog, \
     QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, \
-    QScrollArea, QFrame, QStyledItemDelegate, QComboBox, QSpinBox, QDoubleSpinBox
+    QScrollArea, QFrame, QStyledItemDelegate, QComboBox, QSpinBox, QDoubleSpinBox, \
+    QDialogButtonBox
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QIcon, QAction, QFontDatabase
+from PySide6.QtGui import QIcon, QAction, QFontDatabase, QPixmap
 
 from src.data_models import SimplePandasModel2
+from src.shared.locations import ICONS_DIR, SYSTEM_DEFAULT_ICONS_DIR
 from src.shared.vars import conf_manager as conf
 from src.utils.utils import get_full_icon_path, is_legal_key_sequence
-from src.utils.os_utils import extract_extension_from_path
+from src.utils.os_utils import copy_item, extract_extension_from_path, extract_filename_from_path
 from src.ui_components.misc_widgets.shortcut_keys_configuration import KeyboardShortcutSelectorUi
 from src.ui_components.misc_widgets.dialogs_and_messages import CustomQDialogButtonBox, \
     QDialogButtonsAndWidgets
@@ -93,6 +95,56 @@ class font_picker:
 
         self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
                                         family, Qt.ItemDataRole.EditRole)
+
+
+MAX_ICON_FILE_SIZE_BYTES = 100 * 1024
+
+
+def invalid_icon_reason(path: str):
+    """Why `path` can't be used as an icon, or None if it can."""
+    if extract_extension_from_path(path).lower() != 'png':
+        return f"'{os.path.basename(path)}' is not a PNG file."
+    if os.path.getsize(path) > MAX_ICON_FILE_SIZE_BYTES:
+        return (f"'{os.path.basename(path)}' is "
+                f"{os.path.getsize(path) // 1024} KB - the limit is "
+                f"{MAX_ICON_FILE_SIZE_BYTES // 1024} KB.")
+    if QPixmap(path).isNull():
+        return f"'{os.path.basename(path)}' could not be read as an image."
+    return None
+
+
+class icon_picker:
+    """Value picker for the "Folder icon" row: copies the chosen PNG into results/icons and
+    writes its name (without the extension) into the table, the same way LinksTable.change_icon
+    does for a favorite's icon. Apply / OK then stores that name in FOLDER_ICON_NAME."""
+
+    def __init__(self, row: int, styles_tbl: QTableView):
+        self.row = row
+        self.styles_tbl = styles_tbl
+
+    def __call__(self):
+        # Deliberately unfiltered: an invalid pick has to be possible so the user is told why.
+        path, _ = QFileDialog().getOpenFileName(dir=SYSTEM_DEFAULT_ICONS_DIR)
+        if path:
+            self.apply_selected_file(path)
+
+    def apply_selected_file(self, path: str) -> bool:
+        problem = invalid_icon_reason(path)
+        if problem is None:
+            # Prefixed so a pick can never overwrite _folder_.png or one of the generated
+            # per-extension icons already sitting in results/icons.
+            icon_name = 'folder_' + extract_filename_from_path(path, include_extension=False)
+            if copy_item(path, os.path.join(ICONS_DIR, icon_name + '.png')) > 0:
+                self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
+                                                icon_name, Qt.ItemDataRole.EditRole)
+                return True
+            problem = f"'{os.path.basename(path)}' could not be copied into the icons folder."
+
+        CustomQDialogButtonBox(
+            "Invalid icon",
+            problem + f"\n\nPick a .png image up to {MAX_ICON_FILE_SIZE_BYTES // 1024} KB.",
+            buttons=QDialogButtonBox.StandardButton.Ok).exec()
+        return False
 
 
 class numeric_value_changed:
@@ -377,6 +429,10 @@ class MebuBarManager(QMainWindow):
             elif self.config_data.loc[i, 'Feature'] == 'Font':
                 btn.setIcon(QIcon(get_full_icon_path('_font_picker_')))
                 btn.clicked.connect(font_picker(i, self.styles_table))
+            elif self.config_data.loc[i, 'config_keys_path'][-1] == 'FOLDER_ICON_NAME':
+                # The button itself shows the icon currently in use
+                btn.setIcon(QIcon(get_full_icon_path(conf.FOLDER_ICON_NAME)))
+                btn.clicked.connect(icon_picker(i, self.styles_table))
             else:
                 continue
             self.style_selection_buttons[i] = btn

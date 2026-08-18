@@ -28,19 +28,34 @@ class ExtensionsToIconsMapper:
     def USABLE_EXTENSIONS_AND_ICONS_DF(self) -> pd.DataFrame:
         return self._mapping_df
 
+    def mapping_row_for_app(self, app_path: str) -> pd.DataFrame:
+        """
+        The row to record for `app_path` - its best icon if it has one, and otherwise a row
+        with no icon at all. Some installed apps offer nothing to show (no document types,
+        no icon file the scan can find), and the app still has to be remembered as the one
+        that opens this file type.
+        """
+        from src.utils.os_utils import get_app_supported_extensions_and_icons
+        app_extensions_and_icons_df = get_app_supported_extensions_and_icons(app_path)
+        rows_with_an_icon = \
+            app_extensions_and_icons_df[app_extensions_and_icons_df.icon_full_path_exists.eq(True)]
+        if rows_with_an_icon.shape[0] > 0:
+            return pd.DataFrame(rows_with_an_icon.iloc[0, :]).T
+        if app_extensions_and_icons_df.shape[0] > 0:
+            return pd.DataFrame(app_extensions_and_icons_df.iloc[0, :]).T
+        return pd.DataFrame({'extension': None,
+                             'icon': None,
+                             'icon_full_path': None,
+                             'icon_full_path_exists': False,
+                             'app_path_name': app_path}, index=[0])
+
     def set_default_app_for_extension(self, file_path: str, app_path: str):
         """
         file_path --> file with the required extensions
         app_path --> the app that will be used to open files with extensions
         """
-        from src.utils.os_utils import get_app_supported_extensions_and_icons, \
-            extract_extension_from_path
-        app_extensions_and_icons_df = get_app_supported_extensions_and_icons(app_path)
-        if app_extensions_and_icons_df.icon_full_path_exists.sum() == 0:
-            new_row = app_extensions_and_icons_df.iloc[0, :]
-        else:
-            new_row = app_extensions_and_icons_df[app_extensions_and_icons_df.icon_full_path_exists].iloc[0, :]
-        new_row = pd.DataFrame(new_row).T
+        from src.utils.os_utils import extract_extension_from_path
+        new_row = self.mapping_row_for_app(app_path)
 
         file_extension = extract_extension_from_path(file_path)
         if file_extension in self._mapping_df.extension.values:

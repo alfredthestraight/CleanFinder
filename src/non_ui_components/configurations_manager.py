@@ -623,6 +623,7 @@ class ConfigurationsManager:
             {"config_keys_path": ["FOLDERS_ALWAYS_ABOVE_FILES"], "display_text": "Alywas show folders above files"},
             {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
             {"config_keys_path": ["DUAL_PANE_MODE"], "display_text": "Dual pane mode - two panes side by side (Y/N, applies to new windows)"},
+            {"config_keys_path": ["icons", "FOLDER_ICON_NAME"], "display_text": "Folder icon"},
 
 
             {"config_keys_path": ["fonts", "TEXT_FONT"], "display_text": "Font"},

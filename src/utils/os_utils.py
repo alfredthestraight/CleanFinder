@@ -439,7 +439,12 @@ def usable_icon_extensions() -> frozenset:
     icons_df = extensions_to_icons_mapper.USABLE_EXTENSIONS_AND_ICONS_DF
     if _usable_icon_extensions_cache['num_rows'] != len(icons_df):
         _usable_icon_extensions_cache['num_rows'] = len(icons_df)
-        _usable_icon_extensions_cache['extensions'] = frozenset(icons_df['extension'])
+        # Only the extensions an icon was actually found for. Choosing a default app for a
+        # file type records that app even when it has no icon to show, and reporting such
+        # an extension as its own icon type would send the table looking for a <type>.png
+        # that was never written - painting nothing rather than the generic file icon.
+        _usable_icon_extensions_cache['extensions'] = \
+            frozenset(icons_df[icons_df['icon_full_path_exists'].eq(True)]['extension'])
     return _usable_icon_extensions_cache['extensions']
 
 
@@ -525,65 +530,85 @@ def save_app_icon_in_app_icons_dir(icon_full_path: str,
 
 
 def turn_extensions_and_icons_from_CFBundleTypeExtensions_to_df(extensions_and_icons_list):
-    if len(extensions_and_icons_list) > 0:
-        extensions_and_icons_flattened = []
-        for x in extensions_and_icons_list:
-            if isinstance(x, tuple):
-                if len(x) == 2:
-                    if len(x[0]) >= 2:
-                        extensions_and_icons_flattened = \
-                            extensions_and_icons_flattened + [(y, x[1]) for y in x[0]]
-                    elif len(x[0]) == 1:
-                        extensions_and_icons_flattened.append((x[0][0], x[1]))
-            elif isinstance(x, list):
-                extensions_and_icons_flattened = (extensions_and_icons_flattened +
-                                                  [(y, None) for y in x])
-        df = pd.DataFrame(extensions_and_icons_flattened)
-        df.columns = ['extension', 'icon']
-        return df
-    else:
-        return pd.DataFrame(columns=['extension', 'icon'])
+    extensions_and_icons_flattened = []
+    for x in extensions_and_icons_list:
+        if isinstance(x, tuple):
+            if len(x) == 2:
+                if len(x[0]) >= 2:
+                    extensions_and_icons_flattened = \
+                        extensions_and_icons_flattened + [(y, x[1]) for y in x[0]]
+                elif len(x[0]) == 1:
+                    extensions_and_icons_flattened.append((x[0][0], x[1]))
+        elif isinstance(x, list):
+            extensions_and_icons_flattened = (extensions_and_icons_flattened +
+                                              [(y, None) for y in x])
+    # Named columns rather than assigning to .columns afterwards: an app whose document
+    # types declare no extensions at all flattens to nothing, and naming the columns of a
+    # zero-column frame raises - which would abort the whole installation scan.
+    return pd.DataFrame(extensions_and_icons_flattened, columns=['extension', 'icon'])
+
+
+def get_app_level_icon_path(app_path_name: str):
+    """
+    The icon of the app itself, for extensions whose document type names no icon of its
+    own. Returns None if the app names no icon, or names one that isn't on disk - the
+    name in Info.plist is not proof the file was shipped.
+    """
+    icon_path = read_CFBundleIconFile(app_path_name)
+    if icon_path is not None and os.path.exists(icon_path):
+        return icon_path
+
+    app_name = app_path_name.split(os.sep)[-1].replace('.app', '').replace(' ', '')
+    try:
+        files_in_app_folder = \
+            get_all_items_in_path(os.path.join(app_path_name, 'Contents/Resources'), search_type=1)
+    except:
+        return None
+    icon_files = [x for x in files_in_app_folder if x[-5:] == '.icns']
+    app_icon_file = [x for x in icon_files
+                     if x[:-5].lower() == app_name.lower() or x[:-5].lower() == 'appicon']
+    if len(app_icon_file) > 0:
+        return os.path.join(app_path_name, 'Contents', 'Resources', app_icon_file[0])
+    return None
 
 
 def get_app_supported_extensions_and_icons(app_path_name):
     extensions_and_icons = read_extensions_and_icons_from_CFBundleTypeExtensions(app_path_name)
     df = turn_extensions_and_icons_from_CFBundleTypeExtensions_to_df(extensions_and_icons)
+    app_icon_path = get_app_level_icon_path(app_path_name)
     if df.shape[0] > 0:
+        # Created up front rather than by the partial .loc assignments below, which leave
+        # the columns missing entirely when no document type names an icon.
+        df['icon_full_path'] = None
+        df['icon_full_path_exists'] = False
         icon_exists_ind = df[df['icon'].apply(lambda x: x is not None)].index
         df.loc[icon_exists_ind, 'icon_full_path'] = \
             (df.loc[icon_exists_ind, :].
              apply(lambda x: os.path.join(app_path_name, 'Contents', 'Resources', x['icon']),
                    axis=1))
-        if df.icon_full_path.dropna().shape[0] > 0:
-            if len([x for x in df.icon_full_path.dropna() if 'BetterSnapTool' in x]) > 0:
-                print(1)
         df.loc[icon_exists_ind, 'icon_full_path_exists'] = \
             df.loc[icon_exists_ind, 'icon_full_path'].apply(os.path.exists)
         df['app_path_name'] = app_path_name
-        df.loc[:, 'icon_full_path_exists'].fillna(False, inplace=True)
+        df['icon_full_path_exists'] = df['icon_full_path_exists'].fillna(False).astype(bool)
+
+        # An extension whose document type names no icon (or names one that isn't there)
+        # would otherwise be reported as having no icon at all, which drops it from the
+        # mapping table during installation and leaves it with the generic file icon in
+        # the file explorer. The app's own icon stands in for it. LibreOffice is the case
+        # that made this matter: it lists the extensions it opens without an icon for any
+        # of them, so every extension it is the default app for lost its icon.
+        if app_icon_path is not None:
+            rows_without_an_icon = ~df['icon_full_path_exists']
+            df.loc[rows_without_an_icon, 'icon'] = os.path.basename(app_icon_path)
+            df.loc[rows_without_an_icon, 'icon_full_path'] = app_icon_path
+            df.loc[rows_without_an_icon, 'icon_full_path_exists'] = True
         return df
 
-    icon_path_ = read_CFBundleIconFile(app_path_name)
-    if icon_path_ is not None:
+    if app_icon_path is not None:
         return pd.DataFrame(
                             {'extension': np.nan,
-                             'icon': icon_path_.split('/')[-1],
-                             'icon_full_path': icon_path_,
-                             'icon_full_path_exists': icon_path_ is not None,
-                             'app_path_name': app_path_name}, index=[0])
-
-    app_name = app_path_name.split(os.sep)[-1].replace('.app', '').replace(' ', '')
-    files_in_app_folder = \
-        get_all_items_in_path(os.path.join(app_path_name, 'Contents/Resources'), search_type=1)
-    icon_files = [x for x in files_in_app_folder if x[-5:] == '.icns']
-    app_icon_file = [x for x in icon_files
-                     if x[:-5].lower() == app_name.lower() or x[:-5].lower() == 'appicon']
-    if len(app_icon_file) > 0:
-        return pd.DataFrame(
-                            {'extension': np.nan,
-                             'icon': app_icon_file[0],
-                             'icon_full_path': os.path.join(app_path_name, 'Contents', 'Resources',
-                                                            app_icon_file[0]),
+                             'icon': os.path.basename(app_icon_path),
+                             'icon_full_path': app_icon_path,
                              'icon_full_path_exists': True,
                              'app_path_name': app_path_name}, index=[0])
 

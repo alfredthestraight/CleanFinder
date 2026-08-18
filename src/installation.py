@@ -213,8 +213,13 @@ class ExtensionsToIconsMappingCreator:
 
 
     def filter_invalid_extensions(self, exts_and_icons_df: pd.DataFrame) -> pd.DataFrame:
+        # A blank extension is what a file with no extension in its name resolves to, and
+        # '*' is the wildcard some apps declare for "opens anything" - a mapping row for
+        # either would hand that app's icon to every such file.
+        is_a_real_extension = ~exts_and_icons_df.extension.isin(['', '*'])
         return exts_and_icons_df[(~exts_and_icons_df.icon_full_path.isna()) &
                                  (~exts_and_icons_df.extension.isna()) &
+                                 is_a_real_extension &
                                  (~exts_and_icons_df.icon_full_path_exists.isna())]
 
 
@@ -229,11 +234,64 @@ class ExtensionsToIconsMappingCreator:
             all_extensions_and_icons_df: pd.DataFrame) -> pd.DataFrame:
         for i in range(example_files_with_unique_extensions.shape[0]):
             full_file_path, file_extension = tuple(example_files_with_unique_extensions.iloc[i, :])
+            rows_before = \
+                all_extensions_and_icons_df[all_extensions_and_icons_df.extension == file_extension]
             all_extensions_and_icons_df = \
                 all_extensions_and_icons_df[all_extensions_and_icons_df.extension != file_extension]
             all_extensions_and_icons_df = \
                 self.add_extension_to_mapping_df(full_file_path, all_extensions_and_icons_df)
+            all_extensions_and_icons_df = \
+                self.keep_previous_icon_if_new_row_has_none(all_extensions_and_icons_df,
+                                                            rows_before, file_extension)
         return all_extensions_and_icons_df
+
+
+    @staticmethod
+    def icon_exists_flags(exts_and_icons_df: pd.DataFrame) -> pd.Series:
+        """
+        icon_full_path_exists as a plain boolean column. It arrives holding missing values
+        for rows no icon was ever found for, and comparing rather than filling those in
+        keeps the column's own dtype (object or bool) out of the answer.
+        """
+        return exts_and_icons_df.icon_full_path_exists.eq(True)
+
+
+    @classmethod
+    def has_usable_icon(cls, exts_and_icons_df: pd.DataFrame, extension: str) -> bool:
+        rows = exts_and_icons_df[exts_and_icons_df.extension == extension]
+        if rows.shape[0] == 0 or 'icon_full_path_exists' not in rows.columns:
+            return False
+        return bool(cls.icon_exists_flags(rows).any())
+
+
+    def keep_previous_icon_if_new_row_has_none(self, exts_and_icons_df: pd.DataFrame,
+                                               rows_before: pd.DataFrame,
+                                               extension: str) -> pd.DataFrame:
+        """
+        The row rebuilt from the file's own default app replaces the one found by scanning
+        the installed applications. When that default app has no icon to offer, the
+        extension would be left without one - and an extension with no icon is dropped
+        from the mapping table entirely, so the file explorer falls back to the generic
+        file icon for it. Keep the new row (its default app is the accurate one) and carry
+        the icon the scan had already found over to it.
+        """
+        if self.has_usable_icon(exts_and_icons_df, extension):
+            return exts_and_icons_df
+        if not self.has_usable_icon(rows_before, extension):
+            return exts_and_icons_df
+
+        donor = rows_before[self.icon_exists_flags(rows_before)].iloc[0]
+        # A boolean mask rather than the rows' index labels: these frames are built by
+        # concatenation and carry repeated labels, so .loc on a label would write to
+        # unrelated rows too.
+        new_rows_mask = (exts_and_icons_df.extension == extension).values
+        if not new_rows_mask.any():
+            # The default app could not be resolved at all, so no row was added for this
+            # extension. Put back what the applications scan had found.
+            return pd.concat([exts_and_icons_df, rows_before], axis=0)
+        for column in ['icon', 'icon_full_path', 'icon_full_path_exists']:
+            exts_and_icons_df.loc[new_rows_mask, column] = donor[column]
+        return exts_and_icons_df
 
 
     def add_extension_to_mapping_df(self, file_with_extention_path: str,
