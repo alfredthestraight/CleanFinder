@@ -786,7 +786,7 @@ class ConfigurationsManager:
         return """
             QSplitter{background-color: white;}
             QSplitter::handle:vertical{
-                background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
+                background-color: """ + self.FILE_EXPLORER_BACKGROUND_COLOR + """;
                 width: 0px;
                 height: 0px;
             }
@@ -826,9 +826,14 @@ class ConfigurationsManager:
 
     @property
     def TOOLBAR_STYLE(self):
+        # The band that *surrounds* the breadcrumb navigator (it only shows as a thin
+        # strip around it, because of the margin below). It is backed by the table color
+        # so the pane's column - breadcrumb band on top, table below - is one continuous
+        # color. The breadcrumb interior itself is TEXTBOX_BACKGROUND_COLOR, set in
+        # TEXTBOX_NAVIGATOR_STYLE.
         return """
             QToolBar{border: 1px solid transparent;
-            background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
+            background-color: """ + self.FILE_EXPLORER_BACKGROUND_COLOR + """;
             margin-top: 4px;
             padding: -1px;
             };
@@ -838,8 +843,8 @@ class ConfigurationsManager:
     @property
     def LEFT_TOOLBAR_STYLE(self):
         # Same geometry as TOOLBAR_STYLE, but backed by the left-pane color so the
-        # upper-left button toolbar (nav arrows) blends into the left pane rather
-        # than the file-explorer toolbar area.
+        # upper-left button toolbar (nav arrows) blends into the left pane, while
+        # TOOLBAR_STYLE blends into the table below it.
         return """
             QToolBar{border: 1px solid transparent;
             background-color: """ + self.LEFT_PANE_BACKGROUND_COLOR + """;
@@ -852,7 +857,7 @@ class ConfigurationsManager:
     @property
     def TEXTBOX_STYLE(self):
         return """
-            QLineEdit{background-color: rgb(255,255,255);
+            QLineEdit{background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
             border:  1px solid lightgrey;
             padding-top: -6px;
             padding-left: 16px;
@@ -864,7 +869,7 @@ class ConfigurationsManager:
     def TEXTBOX_NAVIGATOR_STYLE(self):
         return """
             QToolBar {
-            background-color: rgb(255,255,255);
+            background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
             padding-top: 1px;
             padding-bottom: 0px;
             border:  1px solid lightgrey;
