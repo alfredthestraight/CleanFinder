@@ -6,10 +6,10 @@ import pandas as pd
 from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel, QFileDialog, \
     QMenu, QPushButton, QColorDialog, QVBoxLayout, QMenuBar, QWidget, \
     QScrollArea, QFrame, QStyledItemDelegate, QComboBox, QSpinBox, QDoubleSpinBox, \
-    QDialogButtonBox
+    QDialogButtonBox, QStyle, QStyleOptionSpinBox
 from PySide6 import QtCore
-from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QIcon, QAction, QFontDatabase, QPixmap
+from PySide6.QtCore import Qt, QEvent, QPointF
+from PySide6.QtGui import QIcon, QAction, QFontDatabase, QPixmap, QPainter, QPolygonF
 
 from src.data_models import SimplePandasModel2
 from src.shared.locations import ICONS_DIR, SYSTEM_DEFAULT_ICONS_DIR
@@ -113,14 +113,25 @@ def invalid_icon_reason(path: str):
     return None
 
 
-class icon_picker:
-    """Value picker for the "Folder icon" row: copies the chosen PNG into results/icons and
-    writes its name (without the extension) into the table, the same way LinksTable.change_icon
-    does for a favorite's icon. Apply / OK then stores that name in FOLDER_ICON_NAME."""
+# Config key -> the filename prefix given to the copy placed in results/icons. Each picker
+# gets its own prefix so one row's pick can never overwrite another's.
+ICON_PICKER_DEST_PREFIXES = {'FOLDER_ICON_NAME': 'folder_', 'FAVORITES_ICON': 'bookmarks_'}
 
-    def __init__(self, row: int, styles_tbl: QTableView):
+
+class icon_picker:
+    """Value picker for the icon rows ("Folder icon", "Bookmarks title icon"): copies the chosen PNG
+    into results/icons and writes its name (without the extension) into the table, the same way
+    LinksTable.change_icon does for a favorite's icon. Apply / OK then stores that name in the
+    row's config key."""
+
+    def __init__(self, row: int, styles_tbl: QTableView, dest_prefix: str = 'folder_',
+                 button=None):
         self.row = row
         self.styles_tbl = styles_tbl
+        self.dest_prefix = dest_prefix
+        # The dialog button that opened this picker, so its preview icon can be updated in
+        # place once a new icon has been chosen. None when there is no button to update.
+        self.button = button
 
     def __call__(self):
         # Deliberately unfiltered: an invalid pick has to be possible so the user is told why.
@@ -133,10 +144,13 @@ class icon_picker:
         if problem is None:
             # Prefixed so a pick can never overwrite _folder_.png or one of the generated
             # per-extension icons already sitting in results/icons.
-            icon_name = 'folder_' + extract_filename_from_path(path, include_extension=False)
-            if copy_item(path, os.path.join(ICONS_DIR, icon_name + '.png')) > 0:
+            icon_name = self.dest_prefix + extract_filename_from_path(path, include_extension=False)
+            dest_path = os.path.join(ICONS_DIR, icon_name + '.png')
+            if copy_item(path, dest_path) > 0:
                 self.styles_tbl.model().setData(self.styles_tbl.model().index(self.row, 2),
                                                 icon_name, Qt.ItemDataRole.EditRole)
+                if self.button is not None:
+                    self.button.setIcon(QIcon(dest_path))
                 return True
             problem = f"'{os.path.basename(path)}' could not be copied into the icons folder."
 
@@ -170,11 +184,60 @@ class _IgnoreWheelMixin:
         event.ignore()
 
 
-class NoWheelSpinBox(_IgnoreWheelMixin, QSpinBox):
+class _BorderlessSpinBoxMixin:
+    """Draws the spin box without its frame - only the up/down arrows are painted.
+
+    The spin boxes sit inside the cells of the configure-styles table, where the stock
+    frame puts a visible box around every numeric row. A style sheet can hide that frame,
+    but any style sheet set on a QSpinBox takes the widget off the macOS style, and the
+    up/down arrows are then not drawn at all - so the arrows are painted here by hand
+    instead. Clicking and keyboard stepping are unaffected: only painting is replaced.
+    """
+
+    ARROW_WIDTH = 7
+    ARROW_HEIGHT = 4
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The number itself is drawn by a QLineEdit child, which draws its own border and
+        # focus ring on top of the cell - this clears both. Its background is left opaque
+        # on purpose: a transparent one leaves the previously drawn digits in place, so
+        # every repaint stacks another copy of the number on top of the old one.
+        self.lineEdit().setStyleSheet("QLineEdit {border: none;}")
+
+    def _arrow_polygon(self, center, points_up):
+        half_width = self.ARROW_WIDTH / 2
+        half_height = self.ARROW_HEIGHT / 2
+        base_y = center.y() + (half_height if points_up else -half_height)
+        tip_y = center.y() - (half_height if points_up else -half_height)
+        return QPolygonF([QPointF(center.x() - half_width, base_y),
+                          QPointF(center.x() + half_width, base_y),
+                          QPointF(center.x(), tip_y)])
+
+    def paintEvent(self, event):
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        painter = QPainter(self)
+        # Nothing else paints the widget now that the frame is gone, so the background has
+        # to be filled here - otherwise each repaint leaves the previous one showing through.
+        painter.fillRect(self.rect(), self.palette().brush(self.backgroundRole()))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for sub_control, points_up in ((QStyle.SubControl.SC_SpinBoxUp, True),
+                                       (QStyle.SubControl.SC_SpinBoxDown, False)):
+            arrow_rect = self.style().subControlRect(QStyle.ComplexControl.CC_SpinBox,
+                                                     option, sub_control, self)
+            is_pressed = bool(option.activeSubControls & sub_control) and \
+                bool(option.state & QStyle.StateFlag.State_Sunken)
+            painter.setBrush(self.palette().highlight() if is_pressed else self.palette().text())
+            painter.drawPolygon(self._arrow_polygon(arrow_rect.center(), points_up))
+
+
+class NoWheelSpinBox(_IgnoreWheelMixin, _BorderlessSpinBoxMixin, QSpinBox):
     pass
 
 
-class NoWheelDoubleSpinBox(_IgnoreWheelMixin, QDoubleSpinBox):
+class NoWheelDoubleSpinBox(_IgnoreWheelMixin, _BorderlessSpinBoxMixin, QDoubleSpinBox):
     pass
 
 
@@ -410,8 +473,8 @@ class MebuBarManager(QMainWindow):
         self.styles_table.setItemDelegateForColumn(2, self.styles_value_delegate)
         self.styles_table.hideColumn(0)
         self.styles_table.hideColumn(3)
-        self.styles_table.setColumnWidth(1, 300)
-        self.styles_table.setColumnWidth(2, 300)
+        self.styles_table.setColumnWidth(1, 400)
+        self.styles_table.setColumnWidth(2, 200)
         self.styles_table.setColumnWidth(4, 33)
         self.styles_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
 
@@ -429,10 +492,13 @@ class MebuBarManager(QMainWindow):
             elif self.config_data.loc[i, 'Feature'] == 'Font':
                 btn.setIcon(QIcon(get_full_icon_path('_font_picker_')))
                 btn.clicked.connect(font_picker(i, self.styles_table))
-            elif self.config_data.loc[i, 'config_keys_path'][-1] == 'FOLDER_ICON_NAME':
+            elif self.config_data.loc[i, 'config_keys_path'][-1] in ICON_PICKER_DEST_PREFIXES:
+                config_key = self.config_data.loc[i, 'config_keys_path'][-1]
                 # The button itself shows the icon currently in use
-                btn.setIcon(QIcon(get_full_icon_path(conf.FOLDER_ICON_NAME)))
-                btn.clicked.connect(icon_picker(i, self.styles_table))
+                btn.setIcon(QIcon(get_full_icon_path(str(self.config_data.iloc[i, 2])) or ''))
+                btn.clicked.connect(icon_picker(i, self.styles_table,
+                                                dest_prefix=ICON_PICKER_DEST_PREFIXES[config_key],
+                                                button=btn))
             else:
                 continue
             self.style_selection_buttons[i] = btn

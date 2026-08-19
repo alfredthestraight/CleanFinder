@@ -560,7 +560,7 @@ class ui(QtWidgets.QMainWindow):
         if conf.SHOW_FAVORITES_TITLE:
             self.favs_table_view_header = LinksTable({"Name": [conf.FAVORITES_TITLE],
                                                       "Path": [None],
-                                                      "icon_full_path": [get_full_icon_path("_quick_access_")]},
+                                                      "icon_full_path": [get_full_icon_path(conf.FAVORITES_ICON)]},
                                                       row_height=conf.FAVORITES_ROW_HEIGHT + 12)
             # Nudge the icon + text right by a few pixels. spacer_column_indent works only
             # in whole space-characters (too coarse), and setViewportMargins gets wiped by
@@ -791,6 +791,12 @@ class ui(QtWidgets.QMainWindow):
             # Keep the left-padding nudge on the item (see generate_favorites_area).
             self.favs_table_view_header.setStyleSheet(
                 conf.FAVORITES_TABLE_STYLE + "QTableView::item { padding-left: 3px; }")
+            # Pick up a newly chosen bookmarks icon without reopening the window. Addressed by
+            # column name because this one-row table has no spacer column, so icon_full_path
+            # sits at a different position than it does in the favorites table below it.
+            header_model = self.favs_table_view_header.table
+            header_model._data.loc[0, 'icon_full_path'] = get_full_icon_path(conf.FAVORITES_ICON)
+            header_model.layoutChanged.emit()
         self.favs_table_view.setStyleSheet(conf.FAVORITES_TABLE_STYLE)
         self.toolbar.setStyleSheet(conf.LEFT_TOOLBAR_STYLE)
         self.left_column.setStyleSheet(self._left_column_background_style())

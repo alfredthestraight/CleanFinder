@@ -4,6 +4,12 @@ import json
 import datetime
 from src.shared.locations import ICONS_DIR, BASE_ICONS_DIR
 
+# Marks a row in the Edit-configurations table that is a group title rather than a setting.
+# 'header' is not a real python type name, so no code that dispatches on value_type
+# ('int' / 'float' / 'str' / 'rgb(...)') can mistake such a row for an editable setting.
+HEADER_VALUE_TYPE = 'header'
+HEADER_CONFIG_KEYS_PATH = '__header__'
+
 
 def is_string_rgb(s):
     if type(s) != str:
@@ -75,7 +81,7 @@ class ConfigurationsManager:
         self.FILE_EXPLORER_HEADER_COLOR = colors["FILE_EXPLORER_HEADER_COLOR"]
         self.FILE_EXPLORER_BACKGROUND_COLOR = colors["FILE_EXPLORER_BACKGROUND_COLOR"]
         self.FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR = colors["FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"]
-        self.TOOLBAR_BACKGROUND_COLOR = colors["TOOLBAR_BACKGROUND_COLOR"]
+        self.TEXTBOX_BACKGROUND_COLOR = colors["TEXTBOX_BACKGROUND_COLOR"]
         self.LEFT_PANE_BACKGROUND_COLOR = colors["LEFT_PANE_BACKGROUND_COLOR"]
         # Color of the vertical line separating the left pane from the breadcrumbs/table
         self.LEFT_PANE_SEPARATOR_COLOR = colors.get("LEFT_PANE_SEPARATOR_COLOR", "rgb(200, 200, 200)")
@@ -217,7 +223,7 @@ class ConfigurationsManager:
                                     , "FILE_EXPLORER_HEADER_COLOR"
                                     , "FILE_EXPLORER_BACKGROUND_COLOR"
                                     , "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"
-                                    , "TOOLBAR_BACKGROUND_COLOR"
+                                    , "TEXTBOX_BACKGROUND_COLOR"
                                     , "FILE_EXPLORER_GRID_COLOR"]
 
         self.rgb_attribute_rgb_categories = ["FILE_EXPLORER_FONT_COLOR_OTHER_COLS",
@@ -357,7 +363,7 @@ class ConfigurationsManager:
                 "FILE_EXPLORER_HEADER_COLOR": "rgb(255, 255, 255)",
                 "FILE_EXPLORER_BACKGROUND_COLOR": "rgb(255, 255, 255)",
                 "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR": "rgb(255, 255, 255)",
-                "TOOLBAR_BACKGROUND_COLOR": "rgb(255, 255, 255)",
+                "TEXTBOX_BACKGROUND_COLOR": "rgb(255, 255, 255)",
                 "FILE_EXPLORER_GRID_COLOR": "rgb(220, 220, 220)",
                 "BOTTOM_STRIP_COLOR": "rgb(255, 255, 255)",
             },
@@ -618,26 +624,30 @@ class ConfigurationsManager:
             {"config_keys_path": ["SHOW_HIDDEN_ITEMS"], "display_text": "Show hidden items"},
             {"config_keys_path": ["NEW_FOLDER_NAME_TEMPLATE"], "display_text": "New folder name template"},
             {"config_keys_path": ["MULTISELECT_MODIFIER"], "display_text": "Multiselect modifier key (command / control / option / shift)"},
-            {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
-            {"config_keys_path": ["REFRESH_DEBOUNCE_MS"], "display_text": "Delay (ms) before refreshing a folder after it changes on disk"},
             {"config_keys_path": ["FOLDERS_ALWAYS_ABOVE_FILES"], "display_text": "Alywas show folders above files"},
-            {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
             {"config_keys_path": ["DUAL_PANE_MODE"], "display_text": "Dual pane mode - two panes side by side (Y/N, applies to new windows)"},
             {"config_keys_path": ["icons", "FOLDER_ICON_NAME"], "display_text": "Folder icon"},
 
 
+            {"config_keys_path": ["FILE_EXPLORER_SHOW_ROW_NUMBERS"], "display_text": "Show line numbers in table"},
+            {"config_keys_path": ["FILE_EXPLORER_ALTERNATING_ROW_COLORS"], "display_text": "Use alternating row colors in table"},
+
             {"config_keys_path": ["fonts", "TEXT_FONT"], "display_text": "Font"},
+
+            {"header": "Font sizes"},
             {"config_keys_path": ["fonts", "font_sizes", "TEXT_FONT_SIZE"], "display_text": "Table font size"},
             {"config_keys_path": ["fonts", "font_sizes", "HEADER_TEXT_FONT_SIZE"], "display_text": "Table header font size"},
             {"config_keys_path": ["fonts", "font_sizes", "TEXTBOX_FONT_SIZE"], "display_text": "Path textbox font size"},
             {"config_keys_path": ["fonts", "font_sizes", "FAVORITES_FONT_SIZE"], "display_text": "Favorites font size"},
             {"config_keys_path": ["fonts", "font_sizes", "TREE_FONT_SIZE"], "display_text": "Tree font size"},
 
+            {"header": "Font weights"},
             {"config_keys_path": ["fonts", "font_weights", "TEXT_FONT_WEIGHT"], "display_text": "Table font weight (100=thin ... 400=normal ... 700=bold)"},
             {"config_keys_path": ["fonts", "font_weights", "HEADER_TEXT_FONT_WEIGHT"], "display_text": "Table header font weight (100=thin ... 400=normal ... 700=bold)"},
             {"config_keys_path": ["fonts", "font_weights", "FAVORITES_FONT_WEIGHT"], "display_text": "Favorites font weight (100=thin ... 400=normal ... 700=bold)"},
             {"config_keys_path": ["fonts", "font_weights", "TREE_FONT_WEIGHT"], "display_text": "Tree font weight (100=thin ... 400=normal ... 700=bold)"},
 
+            {"header": "Table colors"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR"], "display_text": "Table font color - 1st column"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_FONT_COLOR_OTHER_COLS"], "display_text": "Table font color -  columns 2 to 4"},
             {"config_keys_path": ["fonts", "font_colors", "FILE_EXPLORER_HEADER_FONT_COLOR"], "display_text": "Table header font color"},
@@ -648,30 +658,47 @@ class ConfigurationsManager:
             {"config_keys_path": ["colors", "FILE_EXPLORER_DRAGGED_ROW_HOVER_COLOR"], "display_text": "Table dragged row hover color"},
             {"config_keys_path": ["colors", "FILE_EXPLORER_HEADER_COLOR"], "display_text": "Table header color"},
             {"config_keys_path": ["colors", "FILE_EXPLORER_BACKGROUND_COLOR"], "display_text": "Table background color"},
+            {"config_keys_path": ["colors", "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"], "display_text": "Table alternate background color (if applied)"},
+
+            {"header": "Bottom strip"},
             {"config_keys_path": ["colors", "BOTTOM_STRIP_COLOR"], "display_text": "Bottom strip color"},
             {"config_keys_path": ["fonts", "font_colors", "BOTTOM_STRIP_TEXT_COLOR"], "display_text": "Bottom strip font color"},
             {"config_keys_path": ["fonts", "font_sizes", "BOTTOM_TEXT_FONT_SIZE"], "display_text": "Bottom strip font size"},
-            {"config_keys_path": ["colors", "BOTTOM_STRIP_COLOR"], "display_text": "Bottom strip color"},
-            {"config_keys_path": ["FILE_EXPLORER_ALTERNATING_ROW_COLORS"], "display_text": "Use alternating row colors in table"},
-            {"config_keys_path": ["FILE_EXPLORER_SHOW_ROW_NUMBERS"], "display_text": "Show line numbers in table"},
-            {"config_keys_path": ["colors", "FILE_EXPLORER_ALTERNATE_BACKGROUND_COLOR"], "display_text": "Table alternate background color"},
 
+            {"header": "Left pane colors"},
             {"config_keys_path": ["colors", "LEFT_PANE_BACKGROUND_COLOR"], "display_text": "Left pane background color"},
             {"config_keys_path": ["colors", "LEFT_PANE_SEPARATOR_COLOR"], "display_text": "Left pane separator line color"},
             {"config_keys_path": ["fonts", "font_colors", "LEFT_PANE_FONT_COLOR"], "display_text": "Left pane font color"},
+
+            {"header": "Row heights"},
             {"config_keys_path": ["fonts", "font_row_heights", "FILE_EXPLORER_ROW_HEIGHT"], "display_text": "Table row height"},
             {"config_keys_path": ["fonts", "font_row_heights", "FAVORITES_ROW_HEIGHT"], "display_text": "Favorites row height"},
             {"config_keys_path": ["fonts", "font_row_heights", "TREE_ROW_HEIGHT"], "display_text": "Tree row height"},
-            {"config_keys_path": ["colors", "TOOLBAR_BACKGROUND_COLOR"], "display_text": "Toolbar background color"},
+
+            {"header": "Misc"},
+            {"config_keys_path": ["colors", "TEXTBOX_BACKGROUND_COLOR"], "display_text": "Path textbox background color"},
 
             {"config_keys_path": ["scrollbar", "SCROLLBAR_COLOR"],
              "display_text": "Scrollbar color"},
 
             {"config_keys_path": ["scrollbar", "SCROLLBAR_THICKNESS"],
              "display_text": "Scrollbar thickness"},
+
+            {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
+            {"config_keys_path": ["icons", "FAVORITES_ICON"], "display_text": "Bookmarks title icon"},
+            {"config_keys_path": ["REFRESH_DEBOUNCE_MS"], "display_text": "Delay (ms) before refreshing a folder after it changes on disk"},
+            {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
         ]
 
-        user_styles = [{'config_keys_path': s['config_keys_path'],
+        # A {"header": "..."} entry is not a setting - it is a bold title row that groups
+        # the settings under it. It carries no config value, and value_type HEADER_VALUE_TYPE
+        # is what makes the table render it bold and refuse to edit it.
+        user_styles = [{'config_keys_path': [HEADER_CONFIG_KEYS_PATH],
+                        'Feature': s['header'],
+                        'Value': '',
+                        'value_type': HEADER_VALUE_TYPE
+                        } if 'header' in s else
+                       {'config_keys_path': s['config_keys_path'],
                         'Feature': s['display_text'],
                         'Value': self.access_dict_by_keys_path(self.config, s['config_keys_path']),
                         'value_type': type(self.access_dict_by_keys_path(self.config, s['config_keys_path'])).__name__
@@ -759,7 +786,7 @@ class ConfigurationsManager:
         return """
             QSplitter{background-color: white;}
             QSplitter::handle:vertical{
-                background-color: """ + self.TOOLBAR_BACKGROUND_COLOR + """;
+                background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
                 width: 0px;
                 height: 0px;
             }
@@ -801,7 +828,7 @@ class ConfigurationsManager:
     def TOOLBAR_STYLE(self):
         return """
             QToolBar{border: 1px solid transparent;
-            background-color: """ + self.TOOLBAR_BACKGROUND_COLOR + """;
+            background-color: """ + self.TEXTBOX_BACKGROUND_COLOR + """;
             margin-top: 4px;
             padding: -1px;
             };

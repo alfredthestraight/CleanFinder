@@ -9,7 +9,7 @@ from src.utils.os_utils import get_icon_names, get_dataframe_of_file_names_in_di
 from src.utils.utils import get_full_icon_path
 
 from src.shared.vars import conf_manager as conf
-from src.non_ui_components.configurations_manager import is_string_rgb
+from src.non_ui_components.configurations_manager import is_string_rgb, HEADER_VALUE_TYPE
 import time
 # About roles:
 # https://doc.qt.io/qt-6/qt.html
@@ -350,11 +350,22 @@ class SimplePandasModel2(QAbstractTableModel):
     def columnCount(self, parnet=None):
         return self._data.shape[1]
 
+    def is_header_row(self, row):
+        """A group-title row (e.g. "Font sizes"), not a setting: shown in bold, not editable."""
+        if 'value_type' not in self._data.columns:
+            return False
+        return self._data['value_type'].iloc[row] == HEADER_VALUE_TYPE
+
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if index.isValid():
             value = self._data.iloc[index.row(), index.column()]
             if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
                 return str(value)
+            elif role == Qt.ItemDataRole.FontRole:
+                if self.is_header_row(index.row()):
+                    font = QFont()
+                    font.setBold(True)
+                    return font
             elif role == Qt.ItemDataRole.ForegroundRole:
                 if is_string_rgb(value):
                     col = QColor()
@@ -374,6 +385,8 @@ class SimplePandasModel2(QAbstractTableModel):
             return self._data.columns[col]
 
     def flags(self, index):
+        if index.isValid() and self.is_header_row(index.row()):
+            return Qt.ItemFlag.ItemIsEnabled
         return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
 
 
