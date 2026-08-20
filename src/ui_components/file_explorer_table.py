@@ -27,7 +27,7 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 get_type_as_icon_string, get_file_type, size_bytes_to_string)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
     map_key_to_new_row_num, create_qaction_key_sequence, \
-    update_type_ahead_buffer, compute_type_ahead_target
+    update_type_ahead_buffer, resolve_type_ahead
 from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceTextInSelectedItems,\
     next_new_dir_name, paths_history, ItemsZipper, map_shortcut_name_to_func, RowSelectionExtender,\
      PrefixSuffixChangeInSelectedItems, validate_name_change_is_approved
@@ -1133,7 +1133,9 @@ class FileExplorerTable(QTableView):
 
     def _type_ahead_search(self, e):
         """Windows-style type-to-navigate: printable keystrokes accumulate into a
-        buffer (reset after a short pause) and jump to the first matching filename."""
+        buffer (reset after a short pause) and jump to the first matching filename.
+        If the accumulated buffer matches nothing, the keystroke is retried on its own
+        rather than being ignored - see resolve_type_ahead()."""
         # Ctrl/Cmd/Alt combos are keyboard shortcuts, not type-ahead input.
         disallowed = (QtCore.Qt.KeyboardModifier.ControlModifier
                       | QtCore.Qt.KeyboardModifier.MetaModifier
@@ -1152,7 +1154,9 @@ class FileExplorerTable(QTableView):
         filenames = self.model()._data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
         selected = self.selectedIndexes()
         current_row = selected[0].row() if len(selected) > 0 else None
-        target_row = compute_type_ahead_target(
+        # resolve_type_ahead may rewrite the buffer down to this single keystroke when the
+        # accumulated one matched nothing, so assign it back rather than discarding it.
+        target_row, self._type_ahead_buffer = resolve_type_ahead(
             filenames, self._type_ahead_buffer, current_row)
         if target_row is not None:
             self.keep_selection_as_prev(selected)

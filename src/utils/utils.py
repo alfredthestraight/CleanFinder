@@ -56,6 +56,24 @@ def compute_type_ahead_target(filenames: list, buffer: str, current_row) -> Unio
     return None
 
 
+def resolve_type_ahead(filenames: list, buffer: str, current_row) -> tuple:
+    """Return (row_to_select, buffer_to_keep) for a type-ahead buffer.
+
+    When the accumulated buffer matches nothing - e.g. 're' after 'r' when no name starts
+    with 're' - fall back to just its last character, so that keystroke behaves as if it had
+    started a fresh search instead of being swallowed.
+
+    The buffer that comes back is the one the caller must keep: after a fallback it is the
+    single character, so the next keystroke extends that ('e' -> 'ex') instead of extending
+    the dead buffer ('re' -> 'rex').
+    """
+    target_row = compute_type_ahead_target(filenames, buffer, current_row)
+    if target_row is not None or len(buffer) <= 1:
+        return target_row, buffer
+    last_char = buffer[-1]
+    return compute_type_ahead_target(filenames, last_char, current_row), last_char
+
+
 def traverse_dict_as_tree(d: dict, prefix: str = None):
     dict_items = []
     for k in d.keys():
