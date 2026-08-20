@@ -312,10 +312,11 @@ class ui(QtWidgets.QMainWindow):
 
 
 
-        # Pane-cycling (default Tab / Shift+Tab) is part of the configurable keymap and is
-        # registered on every FileExplorerTable via initialize_all_key_sequences. It must
-        # also fire when the favorites pane has focus, so bind it there too.
-        self.reload_favorites_pane_switch_shortcuts()
+        # Window-level shortcuts (pane cycling, opening the search window) are part of the
+        # configurable keymap and are registered on every FileExplorerTable via
+        # initialize_all_key_sequences. They must also fire when the left pane has focus,
+        # so bind them there too.
+        self.reload_left_pane_shortcuts()
         # shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
         # shortcut2.activated.connect(self.expose_input_textbox)
         
@@ -409,19 +410,42 @@ class ui(QtWidgets.QMainWindow):
     def switch_table_focus_backwards(self):
         self._cycle_pane_focus(-1)
 
-    def reload_favorites_pane_switch_shortcuts(self):
-        # Re-bind the pane-cycling shortcuts on the favorites pane from the current keymap.
-        # Tagged actions are cleared first so keymap reloads don't accumulate stale duplicates.
-        for act in list(self.favs_table_view.actions()):
-            if act.property("is_pane_switch_shortcut"):
-                self.favs_table_view.removeAction(act)
+    def left_pane_shortcut_widgets(self):
+        # The focusable widgets of the left pane: the favorites list and the folder tree.
+        tree = getattr(self, 'tree', None)
+        return [w for w in (self.favs_table_view, tree) if w is not None]
+
+    def reload_left_pane_shortcuts(self):
+        """Re-bind, from the current keymap, the shortcuts that must keep working while the
+        left pane has focus.
+
+        initialize_all_key_sequences registers the whole keymap on every FileExplorerTable,
+        but the left-pane widgets are not tables, so a shortcut pressed there reaches no
+        action at all. The ones that act on the window (rather than on a specific pane) are
+        therefore bound here a second time. Tagged actions are cleared first so keymap
+        reloads don't accumulate stale duplicates.
+        """
+        left_pane_widgets = self.left_pane_shortcut_widgets()
+        for widget in left_pane_widgets:
+            for act in list(widget.actions()):
+                if act.property("is_left_pane_shortcut"):
+                    widget.removeAction(act)
+        # action name -> (handler, the left-pane widgets it should fire from)
+        left_pane_shortcuts = {
+            # Pane cycling starts from the favorites list, so it only needs to fire there.
+            "SWITCH_PANE_FOCUS": (self.switch_table_focus, [self.favs_table_view]),
+            "SWITCH_PANE_FOCUS_BACKWARDS": (self.switch_table_focus_backwards,
+                                            [self.favs_table_view]),
+            # The search window belongs to the window and searches the active pane's folder,
+            # so it must open from anywhere in the left pane - favorites list and tree alike.
+            "LAUNCH_FIND_WINDOW": (self.launch_search_window, left_pane_widgets),
+        }
         shortcuts = conf.get("keyboard_shortcuts")
-        cycling = {"SWITCH_PANE_FOCUS": self.switch_table_focus,
-                   "SWITCH_PANE_FOCUS_BACKWARDS": self.switch_table_focus_backwards}
-        for action_name, handler in cycling.items():
-            for key_sequence in shortcuts.get(action_name, []):
-                action = create_qaction_key_sequence(self.favs_table_view, key_sequence, handler)
-                action.setProperty("is_pane_switch_shortcut", True)
+        for action_name, (handler, widgets) in left_pane_shortcuts.items():
+            for widget in widgets:
+                for key_sequence in shortcuts.get(action_name, []):
+                    action = create_qaction_key_sequence(widget, key_sequence, handler)
+                    action.setProperty("is_left_pane_shortcut", True)
 
     def change_path(self, newpath: str, reset_path_history: bool = True):
         self.file_explorer.change_path(newpath, reset_path_history=reset_path_history)
@@ -605,7 +629,7 @@ class ui(QtWidgets.QMainWindow):
     def reload_keyboard_shortcuts(self):
         for t in self.all_tables():
             t.initialize_all_key_sequences()
-        self.reload_favorites_pane_switch_shortcuts()
+        self.reload_left_pane_shortcuts()
 
     def dragEnterEvent(self, event):
         # Accept the drag if the event contains text

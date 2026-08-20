@@ -63,3 +63,12 @@ registers the `QAction`s via `create_qaction_key_sequence` on next window constr
   (`src/utils/utils.py`) sets this context so that, with two panes registering identical keys
   in one window, Qt doesn't see an ambiguous overload — and each shortcut routes to whichever
   pane has focus.
+- **A shortcut only fires from a file-explorer table.**
+  `FileExplorerTable.initialize_all_key_sequences` registers the whole keymap on each table,
+  and nowhere else. Because of the `WidgetWithChildrenShortcut` scoping above, pressing the
+  key while the **left pane** (favorites list or folder tree) has focus reaches no action at
+  all. If your new shortcut acts on the *window* rather than on a specific pane, add it to
+  `ui.reload_left_pane_shortcuts` (`src/ui_components/ui.py`) as well, mapping it to the
+  left-pane widgets it should fire from. That method tags the actions it creates with the
+  `is_left_pane_shortcut` property and removes them before re-adding, so keymap reloads
+  don't pile up duplicates. `SWITCH_PANE_FOCUS` and `LAUNCH_FIND_WINDOW` are bound this way.
