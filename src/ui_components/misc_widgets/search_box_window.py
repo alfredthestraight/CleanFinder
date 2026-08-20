@@ -1,9 +1,9 @@
 from PySide6 import QtCore
 from PySide6.QtWidgets import (QTableView, QAbstractItemView, QLineEdit, QSizePolicy, QVBoxLayout,
-                               QHBoxLayout, QToolButton, QHeaderView, QDialog, QDialogButtonBox,
-                               QStyledItemDelegate, QStyle)
+                               QHBoxLayout, QToolButton, QLabel, QHeaderView, QDialog,
+                               QDialogButtonBox, QStyledItemDelegate, QStyle)
 from PySide6.QtCore import Signal, QObject, QThread, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetrics
 import os
 import time
 import pandas as pd
@@ -110,6 +110,35 @@ class NoElideDelegate(QStyledItemDelegate):
                          text)
 
 
+class ElidingLabel(QLabel):
+    """A QLabel that never forces its container to grow.
+
+    A plain QLabel holding a long path would push the dialog's minimum width past the path's
+    full length, so the window could not be made narrower. This one is allowed to shrink and
+    shortens the text with '...' in the middle instead, keeping the full text in the tooltip.
+    """
+
+    def __init__(self, text: str = ''):
+        super().__init__()
+        self.full_text = text
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str):
+        self.full_text = text
+        self.setToolTip(text)
+        self.refresh_elided_text()
+
+    def refresh_elided_text(self):
+        # super() so this does not re-enter setText() and clobber self.full_text.
+        super().setText(QFontMetrics(self.font()).elidedText(
+            self.full_text, Qt.TextElideMode.ElideMiddle, self.width()))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_elided_text()
+
+
 class SearchWindow_threaded(QDialog):
     def __init__(self, root_path, encompassing_ui):
         super(SearchWindow_threaded, self).__init__()
@@ -139,6 +168,17 @@ class SearchWindow_threaded(QDialog):
         self.overall_layout = QVBoxLayout()
         self.search_layout = QVBoxLayout()
         self.results_layout = QVBoxLayout()
+
+        # The folder the search runs in, shown above the textbox.
+        self.path_label = ElidingLabel(self.root_path)
+        self.path_label.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
+        self.path_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.path_label.setStyleSheet("""
+            QLabel{background-color: transparent;
+            border: 1px solid transparent;
+            padding-left: 2px;
+            }""")
+        self.search_layout.addWidget(self.path_label)
 
         self.search_box = QLineEdit()
         self.search_box.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
