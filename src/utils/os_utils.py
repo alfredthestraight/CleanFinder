@@ -19,7 +19,7 @@ from os.path import isfile, join
 import LaunchServices as ls
 from Foundation import (NSURL, NSURLLocalizedTypeDescriptionKey, NSURLEffectiveIconKey,
                         NSURLIsHiddenKey)
-from AppKit import NSBitmapImageRep
+from AppKit import NSBitmapImageRep, NSWorkspace
 import io
 # See other item details available in:
 # https://developer.apple.com/documentation/foundation/nsurlresourcekey
@@ -276,6 +276,46 @@ def get_file_apps_info(path: str, output_uti: bool = False):
         return defaultApp, allApps, uti
     else:
         return defaultApp, allApps
+
+
+def get_apps_capable_of_opening_file(path: str) -> list[str]:
+    """Full paths of every installed app that macOS considers able to open `path`.
+
+    Asks Launch Services (the macOS database recording which app handles which file type)
+    through NSWorkspace, so the result matches the list Finder's own "Open with" submenu
+    shows. The app macOS would use by default is placed first; the rest are sorted by name.
+    Works for directories too (Finder, terminals, editors...).
+
+    Returns an empty list if the path cannot be queried, so callers can fall back to the
+    "choose an app yourself" dialog.
+    """
+    try:
+        url = NSURL.fileURLWithPath_(path)
+        if url is None:
+            return []
+        workspace = NSWorkspace.sharedWorkspace()
+        app_paths = [str(app_url.path())
+                     for app_url in (workspace.URLsForApplicationsToOpenURL_(url) or [])]
+        app_paths.sort(key=lambda app_path: get_app_display_name(app_path).lower())
+
+        # URLsForApplicationsToOpenURL_ does not promise any particular order, so the default
+        # app is looked up separately and moved to the front.
+        default_app_url = workspace.URLForApplicationToOpenURL_(url)
+        if default_app_url is not None:
+            default_app_path = str(default_app_url.path())
+            if default_app_path in app_paths:
+                app_paths.remove(default_app_path)
+            app_paths.insert(0, default_app_path)
+        return app_paths
+    except Exception:
+        logger.exception(f"get_apps_capable_of_opening_file failed for {path}")
+        return []
+
+
+def get_app_display_name(app_path: str) -> str:
+    """'/Applications/Microsoft Word.app' -> 'Microsoft Word'."""
+    name = os.path.basename(app_path.rstrip(os.sep))
+    return name[:-4] if name.lower().endswith('.app') else name
 
 
 def is_path_an_app(path: str) -> bool:

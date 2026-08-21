@@ -884,6 +884,16 @@ class FileExplorerTable(QTableView):
                                QMessageBox.StandardButton.Ok)
 
 
+    def open_item_with_app(self, item_path: str, app_path: str):
+        """Open one item with a specific app, picked from the "Open with" submenu.
+
+        Unlike open_item, a directory is handed to the app instead of being navigated into -
+        that is the point of choosing e.g. Terminal or VS Code for a folder.
+        """
+        logger.info(f"FileExplorerTable.open_item_with_app: {item_path}, {app_path}")
+        return run_file_in_terminal(item_path, app_path)
+
+
     def set_default_app_for_files_with_extension(self, path_of_file_with_ext: str, app_path: str):
         logger.info(f"FileExplorerTable.set_default_app_for_files_with_extension: {path_of_file_with_ext}, {app_path}")
         extensions_to_icons_mapper. \

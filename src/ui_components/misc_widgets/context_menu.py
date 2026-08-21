@@ -2,7 +2,12 @@ import os
 from PySide6.QtWidgets import QMenu
 from src.utils.utils import configure_context_menu, add_actions_to_context_menu
 from src.utils.file_explorer_utils import change_items_names_case, open_file_as_app
-from src.utils.os_utils import open_path_in_terminal
+from src.utils.os_utils import open_path_in_terminal, \
+    get_apps_capable_of_opening_file, get_app_display_name
+
+
+# Wide enough for real app names ("Numbers Creator Studio"), unlike the 150px main menu.
+OPEN_WITH_SUBMENU_WIDTH = 230
 
 
 class NewFileCreationWrapper:
@@ -12,6 +17,22 @@ class NewFileCreationWrapper:
 
     def __call__(self) -> int:
         return self.file_exp_obj.create_new_file(self._filename_with_ext)
+
+
+class OpenWithAppWrapper:
+    """Opens one item with one specific app.
+
+    A class rather than a lambda because QAction.triggered passes a bool as the first
+    argument: a `lambda app=app_path: ...` would receive False instead of the app path.
+    """
+
+    def __init__(self, file_exp_obj, item_path: str, app_path: str):
+        self.file_exp_obj = file_exp_obj
+        self.item_path = item_path
+        self.app_path = app_path
+
+    def __call__(self):
+        return self.file_exp_obj.open_item_with_app(self.item_path, self.app_path)
 
 
 class ContextMenuDelegate:
@@ -36,15 +57,22 @@ class ContextMenuDelegate:
         configure_context_menu(self.manipulate_name_submenu)
         self.manipulate_name_submenu.setFixedWidth(180)
 
+        self.open_with_submenu = QMenu(file_exp_obj)
+        configure_context_menu(self.open_with_submenu)
+        self.open_with_submenu.setFixedWidth(OPEN_WITH_SUBMENU_WIDTH)
+        self.open_with_submenu.setTitle("  Open with")
+
     def reconfigure_styles(self):
         """Re-apply menu styling after a live theme/color change. The persistent menus
         keep the stylesheet captured at construction time, so this must be called from
         FileExplorerTable.refresh_all_configurations when the config changes."""
-        for menu in (self.main_menu, self.new_file_submenu, self.manipulate_name_submenu):
+        for menu in (self.main_menu, self.new_file_submenu, self.manipulate_name_submenu,
+                     self.open_with_submenu):
             configure_context_menu(menu)
         # configure_context_menu resets width to 150; restore the submenu widths.
         self.new_file_submenu.setFixedWidth(180)
         self.manipulate_name_submenu.setFixedWidth(180)
+        self.open_with_submenu.setFixedWidth(OPEN_WITH_SUBMENU_WIDTH)
 
     def _repopulate_new_file_submenu(self, new_file_types: list[str]):
         # NewFileCreationWrapper captures the table's current path, so the actions are
@@ -69,6 +97,20 @@ class ContextMenuDelegate:
         self.manipulate_name_submenu.setTitle(submenu_title)
         add_actions_to_context_menu(self.manipulate_name_submenu, self.file_exp_obj,
                                     self.item_name_manipulations_list)
+
+    def _repopulate_open_with_submenu(self, item_full_path: str, app_paths: list[str]):
+        # The apps depend on the clicked item's type, so the entries are rebuilt on every
+        # right-click even though the submenu container itself is reused.
+        self.open_with_submenu.clear()
+        apps_list = [{"menu_item_name": get_app_display_name(app_path),
+                      "associated_method": OpenWithAppWrapper(self.file_exp_obj,
+                                                              item_full_path, app_path)}
+                     for app_path in app_paths]
+        apps_list.append({"menu_item_name": "SEP"})  # Separating line
+        apps_list.append({"menu_item_name": "Other app...",
+                          "associated_method":
+                              lambda: self.file_exp_obj.open_file_with_specified_app(item_full_path)})
+        add_actions_to_context_menu(self.open_with_submenu, self.file_exp_obj, apps_list)
 
     @property
     def click_on_empty_space_actions_list(self):
@@ -155,10 +197,20 @@ class ContextMenuDelegate:
                                      "associated_method": open_file_as_app(items_list[0])}]
                 else:
                     item_full_path = os.path.join(self.file_exp_obj.path, clicked_item_name)
-                    actions_list = [{"menu_item_name": "Open with",
-                                     "associated_method": \
-                                         lambda: self.file_exp_obj.open_file_with_specified_app(item_full_path)}]
-                self.append_to_context_menu(menu, actions_list)
+                    apps = get_apps_capable_of_opening_file(item_full_path)
+                    if apps:
+                        # Submenu listing the apps macOS knows can open this item, plus a way
+                        # to reach the pick-any-app dialog.
+                        self._repopulate_open_with_submenu(item_full_path, apps)
+                        menu.addMenu(self.open_with_submenu)
+                        actions_list = []
+                    else:
+                        # Nothing registered for this type: go straight to the dialog.
+                        actions_list = [{"menu_item_name": "Open with",
+                                         "associated_method": \
+                                             lambda: self.file_exp_obj.open_file_with_specified_app(item_full_path)}]
+                if actions_list:
+                    self.append_to_context_menu(menu, actions_list)
 
 
             """ Functions bulk #3 - remove / rename """
