@@ -185,6 +185,9 @@ class ConfigurationsManager:
         self.FOLDER_ICON_NAME = self.config["icons"]["FOLDER_ICON_NAME"]
         self.FILE_ICON_NAME = self.config["icons"]["FILE_ICON_NAME"]
         self.FAVORITES_ICON = self.config["icons"]['FAVORITES_ICON']
+        # Pixmap shown under the cursor while dragging items. .get so a config file
+        # written before this option existed still loads.
+        self.DRAGGED_ITEM_ICON = self.config["icons"].get('DRAGGED_ITEM_ICON', '_dragged_items_')
         self.FAVORITES_DESKTOP_ICON = self.config["icons"]['FAVORITES_DESKTOP_ICON']
         self.FAVORITES_DOWNLOADS_ICON = self.config["icons"]['FAVORITES_DOWNLOADS_ICON']
         self.FAVORITES_DOCUMENTS_ICON = self.config["icons"]['FAVORITES_DOCUMENTS_ICON']
@@ -377,6 +380,7 @@ class ConfigurationsManager:
                 "FOLDER_ICON_NAME": "_folder_",
                 "FILE_ICON_NAME": "_file_",
                 "FAVORITES_ICON": "_quick_access_",
+                "DRAGGED_ITEM_ICON": "_dragged_items_",
                 "FAVORITES_DESKTOP_ICON": "_desktop_",
                 "FAVORITES_DOWNLOADS_ICON": "_downloads_",
                 "FAVORITES_DOCUMENTS_ICON": "_document_"
@@ -686,6 +690,7 @@ class ConfigurationsManager:
 
             {"config_keys_path": ["SHOW_FAVORITES_TITLE"], "display_text": "Show bookmarks title row"},
             {"config_keys_path": ["icons", "FAVORITES_ICON"], "display_text": "Bookmarks title icon"},
+            {"config_keys_path": ["icons", "DRAGGED_ITEM_ICON"], "display_text": "Dragged item icon"},
             {"config_keys_path": ["REFRESH_DEBOUNCE_MS"], "display_text": "Delay (ms) before refreshing a folder after it changes on disk"},
             {"config_keys_path": ["PAGE_DOWN_UP_NUM_ROWS"], "display_text": "Num rows up/down when clicking page-up / page-down"},
         ]

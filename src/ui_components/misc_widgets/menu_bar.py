@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMainWindow, QTableView, QAbstractItemView, QLabel
     QScrollArea, QFrame, QStyledItemDelegate, QComboBox, QSpinBox, QDoubleSpinBox, \
     QDialogButtonBox, QStyle, QStyleOptionSpinBox
 from PySide6 import QtCore
-from PySide6.QtCore import Qt, QEvent, QPointF
+from PySide6.QtCore import Qt, QEvent, QPointF, QDir
 from PySide6.QtGui import QIcon, QAction, QFontDatabase, QPixmap, QPainter, QPolygonF
 
 from src.data_models import SimplePandasModel2
@@ -58,10 +58,14 @@ class font_picker:
         self.styles_tbl = styles_tbl
 
     def __call__(self):
-        file_dialog = QFileDialog()
-        path, _ = file_dialog.getOpenFileName(dir='/System/Library/Fonts/Supplemental')
-        if not path:
+        file_dialog = QFileDialog(directory='/System/Library/Fonts/Supplemental')
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        # QDir.Hidden makes dot-folders and dot-files visible. Only settable on a dialog
+        # instance - the static getOpenFileName helper used before had no way to pass a filter.
+        file_dialog.setFilter(file_dialog.filter() | QDir.Filter.Hidden)
+        if not (file_dialog.exec() and file_dialog.selectedFiles()):
             return
+        path = file_dialog.selectedFiles()[0]
         if extract_extension_from_path(path).lower() not in ['ttf', 'ttc', 'otf']:
             return
 
@@ -115,7 +119,8 @@ def invalid_icon_reason(path: str):
 
 # Config key -> the filename prefix given to the copy placed in results/icons. Each picker
 # gets its own prefix so one row's pick can never overwrite another's.
-ICON_PICKER_DEST_PREFIXES = {'FOLDER_ICON_NAME': 'folder_', 'FAVORITES_ICON': 'bookmarks_'}
+ICON_PICKER_DEST_PREFIXES = {'FOLDER_ICON_NAME': 'folder_', 'FAVORITES_ICON': 'bookmarks_',
+                            'DRAGGED_ITEM_ICON': 'dragged_'}
 
 
 class icon_picker:
@@ -134,10 +139,16 @@ class icon_picker:
         self.button = button
 
     def __call__(self):
-        # Deliberately unfiltered: an invalid pick has to be possible so the user is told why.
-        path, _ = QFileDialog().getOpenFileName(dir=SYSTEM_DEFAULT_ICONS_DIR)
-        if path:
-            self.apply_selected_file(path)
+        # Deliberately unfiltered by file type: an invalid pick has to be possible so the
+        # user is told why.
+        file_dialog = QFileDialog(directory=SYSTEM_DEFAULT_ICONS_DIR)
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        # QDir.Hidden makes dot-folders and dot-files visible (icons often live in one,
+        # e.g. ~/.icons). Only settable on a dialog instance - the static
+        # getOpenFileName helper used before had no way to pass a filter.
+        file_dialog.setFilter(file_dialog.filter() | QDir.Filter.Hidden)
+        if file_dialog.exec() and file_dialog.selectedFiles():
+            self.apply_selected_file(file_dialog.selectedFiles()[0])
 
     def apply_selected_file(self, path: str) -> bool:
         problem = invalid_icon_reason(path)

@@ -27,7 +27,7 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 get_type_as_icon_string, get_file_type, size_bytes_to_string)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
     map_key_to_new_row_num, create_qaction_key_sequence, \
-    update_type_ahead_buffer, resolve_type_ahead
+    update_type_ahead_buffer, resolve_type_ahead, get_full_icon_path
 from src.utils.file_explorer_utils import DeletionThread, MyStyledItem, ReplaceTextInSelectedItems,\
     next_new_dir_name, paths_history, ItemsZipper, map_shortcut_name_to_func, RowSelectionExtender,\
      PrefixSuffixChangeInSelectedItems, validate_name_change_is_approved
@@ -455,8 +455,9 @@ class FileExplorerTable(QTableView):
         mime_data.setUrls([QUrl.fromLocalFile(p) for p in self.selected_items_paths])
         drag.setMimeData(mime_data)
 
-        # Set the custom pixmap for the dragged item (no decorations)
-        pixmap = QPixmap(os.path.join(ICONS_DIR, DRAGGING_ICON))
+        # Set the custom pixmap for the dragged item (no decorations).
+        # DRAGGING_ICON is the fallback for when the configured icon file is missing.
+        pixmap = QPixmap(get_full_icon_path(conf.DRAGGED_ITEM_ICON) or DRAGGING_ICON)
         drag.setPixmap(pixmap)
 
         # Start the drag operation

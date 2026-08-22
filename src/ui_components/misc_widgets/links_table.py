@@ -140,8 +140,9 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         mime.setText(str(indexes[0].row()))
         drag.setMimeData(mime)
 
-        # Set a custom pixmap to show while dragging
-        drag.setPixmap(QPixmap(DRAGGING_ICON))
+        # Set a custom pixmap to show while dragging.
+        # DRAGGING_ICON is the fallback for when the configured icon file is missing.
+        drag.setPixmap(QPixmap(get_full_icon_path(conf.DRAGGED_ITEM_ICON) or DRAGGING_ICON))
 
         # Start the drag operation
         drag.exec(Qt.DropAction.MoveAction)
