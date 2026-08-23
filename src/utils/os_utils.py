@@ -318,6 +318,26 @@ def get_app_display_name(app_path: str) -> str:
     return name[:-4] if name.lower().endswith('.app') else name
 
 
+def resolve_typed_path(typed_path: str):
+    """The existing path a user's typed/pasted text refers to, or None if there is none.
+
+    Candidates are tried in order, so anything that worked before still works:
+      1. exactly what was typed - a real file or folder name may legitimately start or
+         end with a space, so the raw text gets first refusal;
+      2. with a leading '~' expanded to the home folder ('~/Library', '~someone/Docs') -
+         the shell does this expansion, the filesystem does not;
+      3. and 4. the same two with surrounding whitespace trimmed, which a pasted path
+         often carries.
+    """
+    trimmed = typed_path.strip()
+    candidates = [typed_path, os.path.expanduser(typed_path),
+                  trimmed, os.path.expanduser(trimmed)]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def is_path_an_app(path: str) -> bool:
     return Path(path).is_dir() and path[-4:].lower() == '.app'
 

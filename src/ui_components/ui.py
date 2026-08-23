@@ -15,7 +15,7 @@ from src.ui_components.misc_widgets.dialogs_and_messages import prompt_message
 from src.shared.vars import conf_manager as conf, logger as logger
 
 from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path, dir_, \
-    is_reachable_path
+    is_reachable_path, resolve_typed_path
 from src.data_models import PandasModel
 from src.utils.utils import get_full_icon_path, create_qaction_key_sequence, enable_home_end_keys
 from src.ui_components.file_explorer_table import FileExplorerTable
@@ -725,9 +725,12 @@ class ui(QtWidgets.QMainWindow):
                     self.encompassing_ui.hide_input_textbox(self.pane)
                     self.pane.table.setFocus()
                 elif (event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return):
-                    if os.path.exists(self.pane.textbox.text()):
+                    # resolve_typed_path expands a leading '~' and tolerates stray
+                    # whitespace, so "~/Library" navigates like "/Users/<me>/Library".
+                    target_path = resolve_typed_path(self.pane.textbox.text())
+                    if target_path is not None:
                         try:
-                            self.pane.table.change_path(self.pane.textbox.text())
+                            self.pane.table.change_path(target_path)
                             self.encompassing_ui.hide_input_textbox(self.pane)
                             # Return focus to this pane's table so arrow / Tab keys respond
                             self.pane.table.setFocus()
