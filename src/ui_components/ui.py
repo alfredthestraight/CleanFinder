@@ -410,6 +410,16 @@ class ui(QtWidgets.QMainWindow):
     def switch_table_focus_backwards(self):
         self._cycle_pane_focus(-1)
 
+    def paste_into_active_pane(self):
+        """Paste the clipboard into the folder the active pane is showing.
+
+        Bound to the left-pane widgets as well as to the tables, so the clipboard can be
+        pasted straight after clicking a bookmark or a tree folder - both navigate the
+        active pane but leave the keyboard focus in the left pane. self.file_explorer is
+        read here, when the key is pressed, so it is whichever pane is active by then.
+        """
+        self.file_explorer.paste_items_from_clipboard()
+
     def left_pane_shortcut_widgets(self):
         # The focusable widgets of the left pane: the favorites list and the folder tree.
         tree = getattr(self, 'tree', None)
@@ -421,9 +431,9 @@ class ui(QtWidgets.QMainWindow):
 
         initialize_all_key_sequences registers the whole keymap on every FileExplorerTable,
         but the left-pane widgets are not tables, so a shortcut pressed there reaches no
-        action at all. The ones that act on the window (rather than on a specific pane) are
-        therefore bound here a second time. Tagged actions are cleared first so keymap
-        reloads don't accumulate stale duplicates.
+        action at all. The ones that act on the window, or on the active pane rather than
+        on the focused widget, are therefore bound here a second time. Tagged actions are
+        cleared first so keymap reloads don't accumulate stale duplicates.
         """
         left_pane_widgets = self.left_pane_shortcut_widgets()
         for widget in left_pane_widgets:
@@ -439,6 +449,10 @@ class ui(QtWidgets.QMainWindow):
             # The search window belongs to the window and searches the active pane's folder,
             # so it must open from anywhere in the left pane - favorites list and tree alike.
             "LAUNCH_FIND_WINDOW": (self.launch_search_window, left_pane_widgets),
+            # Clicking a bookmark or a tree folder navigates the active pane but leaves
+            # focus in the left pane, so paste has to work from there too - otherwise the
+            # user has to click into the table first for the shortcut to reach anything.
+            "PASTE_FROM_CLIPBOARD": (self.paste_into_active_pane, left_pane_widgets),
         }
         shortcuts = conf.get("keyboard_shortcuts")
         for action_name, (handler, widgets) in left_pane_shortcuts.items():

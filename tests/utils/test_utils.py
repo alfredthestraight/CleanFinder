@@ -61,6 +61,46 @@ class TestComputeTypeAheadTarget(unittest.TestCase):
         self.assertIsNone(utils.compute_type_ahead_target([], 'r', current_row=None))
 
 
+class TestResolveTypeAhead(unittest.TestCase):
+
+    def setUp(self):
+        self.names = ['report.txt', 'resume.pdf', 'essay.doc', 'Run.sh', 'zebra.png']
+
+    def test_matching_buffer_is_kept_as_is(self):
+        # 're' matches report.txt -> no fallback, buffer untouched
+        self.assertEqual(utils.resolve_type_ahead(self.names, 're', current_row=3),
+                         (0, 're'))
+
+    def test_unmatched_buffer_falls_back_to_last_character(self):
+        # nothing starts with 'rz', so the 'z' keystroke acts on its own -> zebra.png
+        self.assertEqual(utils.resolve_type_ahead(self.names, 'rz', current_row=0),
+                         (4, 'z'))
+
+    def test_fallback_buffer_is_the_single_character(self):
+        # the returned buffer must be 'z', so a following 'e' searches 'ze', not 'rze'
+        _, buffer = utils.resolve_type_ahead(self.names, 'rz', current_row=0)
+        self.assertEqual(utils.update_type_ahead_buffer(buffer, 'e', elapsed_seconds=0.2),
+                         'ze')
+
+    def test_fallback_uses_cycle_mode_like_a_standalone_keypress(self):
+        # 'rx' misses -> retries 'x'... which also misses, so nothing is selected
+        self.assertEqual(utils.resolve_type_ahead(self.names, 'rx', current_row=0),
+                         (None, 'x'))
+
+    def test_fallback_matches_a_standalone_press_of_that_key(self):
+        # falling back to 'r' from row 0 must behave exactly like pressing 'r' there
+        row, _ = utils.resolve_type_ahead(self.names, 'qr', current_row=0)
+        self.assertEqual(row, utils.compute_type_ahead_target(self.names, 'r', current_row=0))
+
+    def test_single_character_buffer_has_nothing_to_fall_back_to(self):
+        self.assertEqual(utils.resolve_type_ahead(self.names, 'q', current_row=None),
+                         (None, 'q'))
+
+    def test_empty_buffer_is_a_no_op(self):
+        self.assertEqual(utils.resolve_type_ahead(self.names, '', current_row=None),
+                         (None, ''))
+
+
 class TestOsUtils(unittest.TestCase):
 
     # @patch('os_utils.Image.open')
