@@ -18,6 +18,7 @@ from src.utils.os_utils import get_last_part_in_path, list_all_subpaths_in_path,
     is_reachable_path, resolve_typed_path
 from src.data_models import PandasModel
 from src.utils.utils import get_full_icon_path, create_qaction_key_sequence, enable_home_end_keys
+from src.utils.file_explorer_utils import map_shortcut_name_to_func
 from src.ui_components.file_explorer_table import FileExplorerTable
 
 class TextboxNavigator(CustomSizeQToolBar):
@@ -199,6 +200,23 @@ class Pane:
         self.column = None           # QWidget stacking top_toolbar over the table
 
 
+# Keymap actions that must keep working while the left pane (favorites list / folder
+# tree) has the keyboard focus. They all act on the window, or on the active pane as a
+# whole, so they mean something even though the left pane holds no file selection.
+# Actions that DO need a file selection - copy, cut, permanently-delete, enter,
+# show-in-Finder, open-in-terminal, context menu, and the Shift+arrow / Shift+Home/End
+# selection-extension keys - are deliberately absent: from the left pane they would have
+# nothing to act on, and binding them there would also steal the arrow keys the tree and
+# the favorites list navigate with.
+LEFT_PANE_ACTIONS = ("NEW_WINDOW", "UP", "BACK", "FORWARD", "PASTE_FROM_CLIPBOARD",
+                     "SELECT_ALL", "LAUNCH_FIND_WINDOW", "UNDO_LAST_ACTION",
+                     "REDO_LAST_UNDONE_ACTION", "JUMP_TO_PATH_TEXTBOX", "CLOSE_WINDOW")
+
+# Pane cycling starts at the favorites list (it is the first entry in the target list
+# _cycle_pane_focus walks), so these two only need to fire from there.
+FAVORITES_ONLY_LEFT_PANE_ACTIONS = ("SWITCH_PANE_FOCUS", "SWITCH_PANE_FOCUS_BACKWARDS")
+
+
 class ui(QtWidgets.QMainWindow):
 
     def __init__(self, encompassing_uis_manager, root_dir_path,
@@ -312,10 +330,10 @@ class ui(QtWidgets.QMainWindow):
 
 
 
-        # Window-level shortcuts (pane cycling, opening the search window) are part of the
-        # configurable keymap and are registered on every FileExplorerTable via
+        # The window-level and active-pane-level shortcuts are part of the configurable
+        # keymap and are registered on every FileExplorerTable via
         # initialize_all_key_sequences. They must also fire when the left pane has focus,
-        # so bind them there too.
+        # so bind them there too (see LEFT_PANE_ACTIONS).
         self.reload_left_pane_shortcuts()
         # shortcut2 = QShortcut(QKeySequence("Ctrl+Alt+Home"), self)
         # shortcut2.activated.connect(self.expose_input_textbox)
@@ -410,20 +428,26 @@ class ui(QtWidgets.QMainWindow):
     def switch_table_focus_backwards(self):
         self._cycle_pane_focus(-1)
 
-    def paste_into_active_pane(self):
-        """Paste the clipboard into the folder the active pane is showing.
-
-        Bound to the left-pane widgets as well as to the tables, so the clipboard can be
-        pasted straight after clicking a bookmark or a tree folder - both navigate the
-        active pane but leave the keyboard focus in the left pane. self.file_explorer is
-        read here, when the key is pressed, so it is whichever pane is active by then.
-        """
-        self.file_explorer.paste_items_from_clipboard()
-
     def left_pane_shortcut_widgets(self):
         # The focusable widgets of the left pane: the favorites list and the folder tree.
         tree = getattr(self, 'tree', None)
         return [w for w in (self.favs_table_view, tree) if w is not None]
+
+    def _active_pane_shortcut_handler(self, action_name: str):
+        """Build the handler for one left-pane shortcut.
+
+        map_shortcut_name_to_func returns a method bound to the table it is given, so
+        resolving it here, at bind time, would freeze the shortcut onto whichever pane
+        happened to be active while the window was being built. The returned lambda looks
+        self.file_explorer up when the key is actually pressed instead, so the shortcut
+        always acts on the pane that is active by then - which matters because clicking a
+        bookmark or a tree folder navigates the active pane but leaves focus in the left
+        pane, and that active pane can change in between.
+
+        The lambda takes no arguments on purpose: QAction.triggered emits a bool as its
+        first argument, and a one-argument lambda would receive that bool.
+        """
+        return lambda: map_shortcut_name_to_func(self.file_explorer, action_name)()
 
     def reload_left_pane_shortcuts(self):
         """Re-bind, from the current keymap, the shortcuts that must keep working while the
@@ -431,31 +455,24 @@ class ui(QtWidgets.QMainWindow):
 
         initialize_all_key_sequences registers the whole keymap on every FileExplorerTable,
         but the left-pane widgets are not tables, so a shortcut pressed there reaches no
-        action at all. The ones that act on the window, or on the active pane rather than
-        on the focused widget, are therefore bound here a second time. Tagged actions are
-        cleared first so keymap reloads don't accumulate stale duplicates.
+        action at all - the user would have to click into a table first. The window-level
+        and active-pane-level actions (LEFT_PANE_ACTIONS, plus the pane-cycling pair that
+        only makes sense from the favorites list) are therefore bound here a second time.
+        Tagged actions are cleared first so keymap reloads don't accumulate stale
+        duplicates.
         """
         left_pane_widgets = self.left_pane_shortcut_widgets()
         for widget in left_pane_widgets:
             for act in list(widget.actions()):
                 if act.property("is_left_pane_shortcut"):
                     widget.removeAction(act)
-        # action name -> (handler, the left-pane widgets it should fire from)
-        left_pane_shortcuts = {
-            # Pane cycling starts from the favorites list, so it only needs to fire there.
-            "SWITCH_PANE_FOCUS": (self.switch_table_focus, [self.favs_table_view]),
-            "SWITCH_PANE_FOCUS_BACKWARDS": (self.switch_table_focus_backwards,
-                                            [self.favs_table_view]),
-            # The search window belongs to the window and searches the active pane's folder,
-            # so it must open from anywhere in the left pane - favorites list and tree alike.
-            "LAUNCH_FIND_WINDOW": (self.launch_search_window, left_pane_widgets),
-            # Clicking a bookmark or a tree folder navigates the active pane but leaves
-            # focus in the left pane, so paste has to work from there too - otherwise the
-            # user has to click into the table first for the shortcut to reach anything.
-            "PASTE_FROM_CLIPBOARD": (self.paste_into_active_pane, left_pane_widgets),
-        }
+        # (action name, the left-pane widgets it should fire from)
+        bindings = ([(name, left_pane_widgets) for name in LEFT_PANE_ACTIONS] +
+                    [(name, [self.favs_table_view])
+                     for name in FAVORITES_ONLY_LEFT_PANE_ACTIONS])
         shortcuts = conf.get("keyboard_shortcuts")
-        for action_name, (handler, widgets) in left_pane_shortcuts.items():
+        for action_name, widgets in bindings:
+            handler = self._active_pane_shortcut_handler(action_name)
             for widget in widgets:
                 for key_sequence in shortcuts.get(action_name, []):
                     action = create_qaction_key_sequence(widget, key_sequence, handler)
