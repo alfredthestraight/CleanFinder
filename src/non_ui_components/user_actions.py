@@ -1,7 +1,29 @@
 import os.path
 from src.utils.os_utils import move_item_from_dir1_to_dir2, move_to_trash, copy_item_to_dir, \
-    extract_parent_path_from_path, extract_filename_from_path, create_file, is_dir, extract_extension_from_path
+    extract_parent_path_from_path, extract_filename_from_path, create_file, is_dir, \
+    extract_extension_from_path, volume_of_path, TRASH_UNAVAILABLE
+from src.ui_components.misc_widgets.dialogs_and_messages import prompt_trash_unavailable
 from abc import ABC, abstractmethod
+
+
+def _trash_or_report(item_paths: list[str]) -> bool:
+    """Trash every path, or tell the user why nothing could be trashed.
+
+    Returns False when the volume has no Trash - undoing a paste means deleting what was
+    pasted, and on a volume without a Trash (network share, FAT/exFAT, Trash turned off)
+    macOS refuses to do that. Reporting it and returning False keeps the action on the undo
+    stack instead of letting an OSError escape, which is what used to happen.
+    """
+    for i, item_path in enumerate(item_paths):
+        if not os.path.exists(item_path):
+            continue
+        if move_to_trash(item_path) == TRASH_UNAVAILABLE:
+            # One paste lands in one folder, so every remaining item is on the same
+            # volume and would fail the same way. Whatever was already trashed stays
+            # trashed; a retry skips those, since they no longer exist.
+            prompt_trash_unavailable(volume_of_path(item_path), len(item_paths) - i)
+            return False
+    return True
 
 
 
@@ -48,12 +70,14 @@ class UserActionsManager(ABC):
 
     def undo_last(self):
         if self.actions:
-            last_action = self.actions.pop()
-            # if not last_action.undo_available():
-            #     prompt_message(title_text=f"Cannot undo",
-            #                    message_text=last_action.cannot_undo_reason())
-            # else:
-            last_action.undo()
+            last_action = self.actions[-1]
+            # Only retire the action once it actually undid something. Popping first meant
+            # a failing undo (e.g. the volume has no Trash, which used to raise straight
+            # out of here) dropped the action from both stacks, silently shifting every
+            # later Ctrl+Z by one.
+            if last_action.undo() is False:
+                return
+            self.actions.pop()
             self.actions_undone.append(last_action)
 
     def redo_last(self):
@@ -92,8 +116,7 @@ class UserAction_CreateItem(UserAction):
         self.is_dir = is_dir(item_full_path)
 
     def undo(self):
-        if os.path.exists(self.item_full_path):
-            move_to_trash(self.item_full_path)
+        return _trash_or_report([self.item_full_path])
 
     def redo(self):
         if not os.path.exists(self.item_full_path):
@@ -112,8 +135,7 @@ class UserAction_CopyPasteItem(UserAction):
         self.dest_path = dest_path
 
     def undo(self):
-        if os.path.exists(os.path.join(self.dest_path, self.filename)):
-            move_to_trash(os.path.join(self.dest_path, self.filename))
+        return _trash_or_report([os.path.join(self.dest_path, self.filename)])
 
     def redo(self):
         if (os.path.exists(os.path.join(self.source_path, self.filename)) and
@@ -181,9 +203,7 @@ class UserAction_CopyPasteItemsUsingThread(UserAction):
         self.threads = []
 
     def undo(self):
-        for item_path in [item[1] for item in self.source_destination_pairs]:
-            if os.path.exists(item_path):
-                move_to_trash(item_path)
+        return _trash_or_report([item[1] for item in self.source_destination_pairs])
 
     def redo(self):
         src_items = [x[0] for x in self.source_destination_pairs]

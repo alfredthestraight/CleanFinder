@@ -200,8 +200,13 @@ class UiWindowManager(QMainWindow):
         for w in self.windows:
             for t in w.all_tables():
                 if t.path == path:
+                    # clearSelection first (drops the pre-paste highlight), then record the
+                    # pasted names - keep_after_refresh makes them survive the filesystem
+                    # watcher's refresh, which resets the model and would otherwise wipe the
+                    # highlight a few hundred milliseconds after it appeared.
                     t.clearSelection()
-                    t.delayed_select_rows_where_items_texts_are(items)
+                    t.delayed_select_rows_where_items_texts_are(items,
+                                                                keep_after_refresh=True)
 
     def switch_ordering_of_file_explorer_column(self, col_ind: int, path: str):
         logger.info("UiWindowManager.switch_ordering_of_file_explorer_column")

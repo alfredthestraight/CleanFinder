@@ -945,12 +945,44 @@ def get_clipboard_copied_files_paths():
     return copied_file_paths
 
 
+# move_to_trash outcomes
+TRASH_OK = 1
+TRASH_ITEM_MISSING = -1
+TRASH_UNAVAILABLE = 0
+
+
+def volume_of_path(path: str) -> str:
+    """The mount point the path lives on - '/Volumes/Tech' for '/Volumes/Tech/a/b', '/' for
+    anything on the boot disk. Used to name the volume in messages about it."""
+    path = os.path.abspath(path)
+    while path != os.path.dirname(path):
+        if os.path.ismount(path):
+            return path
+        path = os.path.dirname(path)
+    return path
+
+
 def move_to_trash(item_path: str):
-    if os.path.exists(item_path):
+    """Move an item to the Trash.
+
+    Returns TRASH_OK on success, TRASH_ITEM_MISSING if the path is already gone, and
+    TRASH_UNAVAILABLE when the volume holding the item has no Trash at all: network shares
+    (SMB/AFP), FAT/exFAT drives and volumes with the Trash turned off have no .Trashes
+    folder, and macOS answers NSFileManager.trashItemAtURL: with "The volume doesn't have a
+    trash." send2trash raises that as an OSError. Letting it escape broke whatever was doing
+    the deleting - undoing a paste showed the raw error and corrupted the undo stack, and
+    DeletionThread's worker died mid-loop with nothing deleted and no message - so it is
+    reported through the return value and left to the caller to tell the user about.
+    """
+    if not os.path.exists(item_path):
+        return TRASH_ITEM_MISSING
+    try:
         send2trash(item_path)
-        return 1
-    else:
-        return -1
+    except OSError as e:
+        logger.warning(f"move_to_trash: '{volume_of_path(item_path)}' has no Trash "
+                       f"({e}); '{item_path}' was left alone")
+        return TRASH_UNAVAILABLE
+    return TRASH_OK
 
 
 def create_file(full_file_path: str):

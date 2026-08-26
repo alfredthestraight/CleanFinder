@@ -9,9 +9,11 @@ from PySide6.QtWidgets import QMainWindow, QTableWidget, QTableWidgetItem, QRadi
     QHBoxLayout, QButtonGroup, QVBoxLayout, QPushButton, QCheckBox, QFrame, QScrollArea, QLabel,\
     QProgressBar
 from src.utils.os_utils import move_to_trash, extract_filename_from_path, count_tree, \
+    volume_of_path, TRASH_UNAVAILABLE, \
     copy_tree_with_progress, get_all_item_names_in_directory, extract_parent_path_from_path, \
     increment_max_item_name, delete_item, size_bytes_to_string
-from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons
+from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons, \
+    prompt_trash_unavailable
 from src.non_ui_components.user_actions import (UserAction_CopyPasteItemsUsingThread,
                                                 UserAction_MoveFilesUsingThread)
 from src.shared.vars import logger as logger
@@ -318,6 +320,13 @@ class PasterObject(QWidget):
                 self.dialog.move(self.position_on_screen)
             self.dialog.show()
 
+        # A move whose sources couldn't be trashed copied the items over but left the
+        # originals behind - say so, rather than letting the move look like it worked.
+        sources_not_trashed = result.get('sources_not_trashed', [])
+        if len(sources_not_trashed) > 0:
+            prompt_trash_unavailable(volume_of_path(sources_not_trashed[0]),
+                                     len(sources_not_trashed))
+
         # A cancelled paste still pasted whatever it got through before stopping, so it is
         # recorded for undo exactly like a completed one
         if call_type in ('finished_all', 'forced_to_stop', 'paste_error'):
@@ -376,6 +385,10 @@ class PasteItemsThread(QThread):
         items_skipped = []
         items_not_pasted = []
         items_pasted = []
+        # Sources a move (cut + paste) copied over but could not remove, because their
+        # volume has no Trash. Reported once at the end so the move doesn't silently
+        # turn into a copy.
+        sources_not_trashed = []
         result = {'call_type': 'finished_all'}
 
         try:
@@ -452,7 +465,8 @@ class PasteItemsThread(QThread):
                 elif success == 0:
                     items_not_pasted.append((src, dest))
                 if self.delete_source_after_paste:
-                    move_to_trash(src)
+                    if move_to_trash(src) == TRASH_UNAVAILABLE:
+                        sources_not_trashed.append(src)
 
             self.progress.emit(self._files_done, files_total, self._bytes_done, bytes_total)
 
@@ -467,7 +481,8 @@ class PasteItemsThread(QThread):
             # Single writer to the queue, on every exit path
             result.update({'items_skipped': items_skipped,
                            'items_not_pasted': items_not_pasted,
-                           'items_pasted': items_pasted})
+                           'items_pasted': items_pasted,
+                           'sources_not_trashed': sources_not_trashed})
             self.results_queue.put(result)
 
 

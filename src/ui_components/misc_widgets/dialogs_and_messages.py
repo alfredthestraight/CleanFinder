@@ -15,6 +15,23 @@ def prompt_message(title_text: str, message_text: str):
     msg_box.exec()
 
 
+def prompt_trash_unavailable(volume: str, num_items: int = 1):
+    """
+    Tell the user that nothing was deleted because the volume has no Trash.
+
+    Network shares, FAT/exFAT drives and volumes with the Trash turned off have no .Trashes
+    folder, so macOS refuses to trash anything on them. Nothing is deleted in that case -
+    permanent deletion is left to the user to ask for explicitly.
+    """
+    what = "the item" if num_items == 1 else f"the {num_items} items"
+    prompt_message(
+        title_text="Nothing was moved to the Trash",
+        message_text=(f"'{volume}' has no Trash, so {what} could not be moved there.\n"
+                      f"Nothing was deleted.\n\n"
+                      f"To remove them anyway, delete them permanently "
+                      f"(the 'Permanently delete' keyboard shortcut, Shift+Del by default)."))
+
+
 class TextMessageBoxNoBottons(QDialog):
     """
     Only text. No buttons

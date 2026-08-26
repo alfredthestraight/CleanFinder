@@ -5,7 +5,8 @@ from PySide6.QtGui import QFont, QColor, QBrush, QCursor
 from PySide6.QtCore import Qt, QItemSelectionModel, Signal, QThread, QTimer
 from src.shared.vars import conf_manager as conf, logger as logger
 from src.utils.os_utils import (open_application, extract_filename_from_path, delete_item,
-                                move_to_trash, extract_extension_from_path, dir_)
+                                move_to_trash, extract_extension_from_path, dir_,
+                                TRASH_UNAVAILABLE)
 from src.utils.utils import get_max_integer_suffix_among_strings_with_prefix
 from src.shared.vars import threads_server
 from PySide6.QtWidgets import (QMessageBox, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDialog,
@@ -343,6 +344,9 @@ class DeletionThread(QThread):
         self.paths = paths
         self.permanently = permanently
         self.currently_running = False
+        # Set when the volume turned out to have no Trash, so the caller can say so once
+        # the thread finishes (a worker thread must not put up dialogs itself).
+        self.trash_unavailable = False
 
     def run(self):
         self.currently_running = True
@@ -354,6 +358,12 @@ class DeletionThread(QThread):
                 success = delete_item(path)
             else:
                 success = move_to_trash(path)
+                if success == TRASH_UNAVAILABLE:
+                    # Every path here comes from one directory, so it is all one volume:
+                    # if this one has no Trash the rest would fail the same way. Stop and
+                    # let the caller report it instead of dying with an uncaught OSError.
+                    self.trash_unavailable = True
+                    break
         self.currently_running = False
 
 

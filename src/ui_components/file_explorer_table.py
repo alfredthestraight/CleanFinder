@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QTableView, QAbstractItemView, QMes
 from src.ui_components.misc_widgets.properties_window import (PropertiesWindowSingleItem,
                                                               PropertiesWindowMultipleItems)
 from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons, \
-    message_box_w_arrow_keys_enabled, prompt_message
+    message_box_w_arrow_keys_enabled, prompt_message, prompt_trash_unavailable
 from src.ui_components.misc_widgets.misc_widgets import QFileDialogWithCheckbox
 from src.non_ui_components.user_actions import UserAction_RenameItem, UserAction_CreateItem
 from src.shared.locations import DRAGGING_ICON, ICONS_DIR, APPLICATION_DIRECTORIES
@@ -24,7 +24,8 @@ from src.utils.os_utils import (get_item_date_modified, get_dataframe_of_file_na
                                 extract_extension_from_path, extract_filename_from_path, is_root,
                                 save_app_icon_in_app_icons_dir, open_path_in_terminal, show_in_finder, dir_,
                                 create_file, increment_max_item_name, get_all_item_names_in_directory,
-                                get_type_as_icon_string, get_file_type, size_bytes_to_string)
+                                get_type_as_icon_string, get_file_type, size_bytes_to_string,
+                                volume_of_path)
 from src.utils.utils import SinglePathQFileSystemWatcherWithContextManager, single_run_qtimer, \
     map_key_to_new_row_num, create_qaction_key_sequence, \
     update_type_ahead_buffer, resolve_type_ahead, get_full_icon_path
@@ -72,6 +73,11 @@ class FileExplorerTable(QTableView):
         self.prev_selected_index = None
         self.last_selected_index = None
         self._pending_created_item_name = None
+        # Item names to keep selected across directory refreshes (see
+        # _reapply_kept_selection), and a guard so re-applying that selection isn't
+        # mistaken for the user picking something else.
+        self._names_to_keep_selected = []
+        self._reapplying_selection = False
 
         self.last_selection_change_time = 0.0
         self._type_ahead_buffer = ''
@@ -305,8 +311,44 @@ class FileExplorerTable(QTableView):
                                      QItemSelectionModel.SelectionFlag.Select |
                                      QItemSelectionModel.SelectionFlag.Rows)
 
+    def _reapply_kept_selection(self) -> bool:
+        """Re-select the items recorded in _names_to_keep_selected, if they are on screen.
+
+        A directory refresh that finds any change calls beginResetModel/endResetModel
+        (PandasModelBase.refresh_data), and a model reset wipes the view's selection. So a
+        one-shot "select what was just pasted" timer loses its highlight to the next
+        filesystem-watcher refresh - which, for a paste, lands a few hundred milliseconds
+        later. Re-applying here instead makes the selection survive every refresh until the
+        user selects something else or navigates away.
+
+        Returns False when there was nothing to re-apply: either nothing is recorded, or
+        the names are not in the table yet (the disk re-read hasn't caught up - a later
+        refresh retries).
+        """
+        if len(self._names_to_keep_selected) == 0:
+            return False
+        present = set(self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist())
+        wanted = [name for name in self._names_to_keep_selected if name in present]
+        if len(wanted) == 0:
+            return False
+        self._reapplying_selection = True
+        try:
+            self.clearSelection()
+            self.select_rows_where_items_texts_are(wanted)
+        finally:
+            self._reapplying_selection = False
+        return True
+
     def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300,
-                                                  clear_first=False):
+                                                  clear_first=False,
+                                                  keep_after_refresh=False):
+        if keep_after_refresh:
+            # Recorded before the timer fires, so a refresh landing inside the delay window
+            # selects them too rather than being raced by it.
+            self._names_to_keep_selected = list(new_items_names)
+            self.print_stuff_timer = single_run_qtimer(delay, self._reapply_kept_selection)
+            return
+
         def _do_select():
             if clear_first:
                 self.clearSelection()
@@ -708,11 +750,19 @@ class FileExplorerTable(QTableView):
             self.browsing_history_manager.remove_paths_and_subpaths_from_history(paths)
             deletion_thread = DeletionThread(paths, permanently)
             self.deletion_threads.append(deletion_thread)
+            # The worker can't put up a dialog itself, so it records a missing Trash and we
+            # report it here, on the UI thread, once it has finished.
+            deletion_thread.finished.connect(
+                lambda: self._report_trash_unavailable(deletion_thread, len(paths)))
             deletion_thread.start()
             self.encompassing_uis_manager.remove_paths_and_subpaths_from_browsing_histories(paths)
             self.deletion_timer = \
                 single_run_qtimer(200, lambda: self.encompassing_uis_manager.refresh_all_uis())
 
+
+    def _report_trash_unavailable(self, deletion_thread, num_items: int):
+        if getattr(deletion_thread, 'trash_unavailable', False):
+            prompt_trash_unavailable(volume_of_path(self.path), num_items)
 
     def remove_items(self):
         self._remove_items(permanently=False)
@@ -772,6 +822,7 @@ class FileExplorerTable(QTableView):
         if reset_path_history:
             self.browsing_history_manager.reset_head_to_current_path()
         self.prev_selected_index = None
+        self._names_to_keep_selected = []
         self.just_changed_path_flag = True
 
         # Select the directory from which user changed path
@@ -925,6 +976,10 @@ class FileExplorerTable(QTableView):
         Clicking on an already-selected item will not invoke this method.
         """
         time_now = time.time()
+        # The user picking something else ends the "keep the pasted items selected" state.
+        # Our own re-application sets the guard, so it doesn't cancel itself.
+        if not self._reapplying_selection:
+            self._names_to_keep_selected = []
         self.prev_selected_index = deselected.indexes()[0] if len(deselected.indexes()) > 0 else None
         self.last_selected_index = selected.indexes()[0] if len(selected.indexes()) > 0 else None
         size_items = beautify_bytes_size(self.total_size_of_selected_files())[2]
@@ -1235,6 +1290,12 @@ class FileExplorerTable(QTableView):
         # harmless now: it coalesces through _schedule_refresh, and refresh_data() early-returns
         # when the directory contents are unchanged.
         self.pandasModel.refresh_data()
+        # Items a paste (or anything else using keep_after_refresh) asked to keep selected
+        # win over the single-row restore below: that restore's selectRow would fire
+        # on_selectionChanged and drop the recorded names on the very refresh they are
+        # meant to survive.
+        if self._reapply_kept_selection() or len(self._names_to_keep_selected) > 0:
+            return
         # Select the item which was selected before the refresh
         if self.prev_selected_index is not None:
             row = self.prev_selected_index.row()
