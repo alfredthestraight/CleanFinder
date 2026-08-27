@@ -210,11 +210,12 @@ class Pane:
 # the favorites list navigate with.
 LEFT_PANE_ACTIONS = ("NEW_WINDOW", "UP", "BACK", "FORWARD", "PASTE_FROM_CLIPBOARD",
                      "SELECT_ALL", "LAUNCH_FIND_WINDOW", "UNDO_LAST_ACTION",
-                     "REDO_LAST_UNDONE_ACTION", "JUMP_TO_PATH_TEXTBOX", "CLOSE_WINDOW")
-
-# Pane cycling starts at the favorites list (it is the first entry in the target list
-# _cycle_pane_focus walks), so these two only need to fire from there.
-FAVORITES_ONLY_LEFT_PANE_ACTIONS = ("SWITCH_PANE_FOCUS", "SWITCH_PANE_FOCUS_BACKWARDS")
+                     "REDO_LAST_UNDONE_ACTION", "JUMP_TO_PATH_TEXTBOX", "CLOSE_WINDOW",
+                     # Pane cycling fires from the whole left pane, the folder tree
+                     # included: clicking a tree folder leaves focus there, and Tab has to
+                     # get out of it. The tree is not a stop in the cycle - see
+                     # _cycle_pane_focus.
+                     "SWITCH_PANE_FOCUS", "SWITCH_PANE_FOCUS_BACKWARDS")
 
 
 class ui(QtWidgets.QMainWindow):
@@ -412,6 +413,10 @@ class ui(QtWidgets.QMainWindow):
         # direction = 1: forward (favorites -> pane(s) -> favorites),
         # direction = -1: backward. Cycles across the favorites pane and every table pane.
         targets = [self.favs_table_view] + self.all_tables()
+        # Default 0 = the favorites position. Nothing else in the left pane is a stop in
+        # the cycle, so pressing the key while the folder tree has focus enters the cycle
+        # as if the user were standing on the favorites list: forward to the first pane,
+        # backward to the last one. The tree is never landed on.
         idx = 0
         for i, t in enumerate(targets):
             if t.hasFocus():
@@ -456,24 +461,19 @@ class ui(QtWidgets.QMainWindow):
         initialize_all_key_sequences registers the whole keymap on every FileExplorerTable,
         but the left-pane widgets are not tables, so a shortcut pressed there reaches no
         action at all - the user would have to click into a table first. The window-level
-        and active-pane-level actions (LEFT_PANE_ACTIONS, plus the pane-cycling pair that
-        only makes sense from the favorites list) are therefore bound here a second time.
-        Tagged actions are cleared first so keymap reloads don't accumulate stale
-        duplicates.
+        and active-pane-level actions (LEFT_PANE_ACTIONS) are therefore bound here a second
+        time, on every focusable left-pane widget. Tagged actions are cleared first so
+        keymap reloads don't accumulate stale duplicates.
         """
         left_pane_widgets = self.left_pane_shortcut_widgets()
         for widget in left_pane_widgets:
             for act in list(widget.actions()):
                 if act.property("is_left_pane_shortcut"):
                     widget.removeAction(act)
-        # (action name, the left-pane widgets it should fire from)
-        bindings = ([(name, left_pane_widgets) for name in LEFT_PANE_ACTIONS] +
-                    [(name, [self.favs_table_view])
-                     for name in FAVORITES_ONLY_LEFT_PANE_ACTIONS])
         shortcuts = conf.get("keyboard_shortcuts")
-        for action_name, widgets in bindings:
+        for action_name in LEFT_PANE_ACTIONS:
             handler = self._active_pane_shortcut_handler(action_name)
-            for widget in widgets:
+            for widget in left_pane_widgets:
                 for key_sequence in shortcuts.get(action_name, []):
                     action = create_qaction_key_sequence(widget, key_sequence, handler)
                     action.setProperty("is_left_pane_shortcut", True)
