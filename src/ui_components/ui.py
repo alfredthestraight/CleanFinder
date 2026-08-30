@@ -21,6 +21,49 @@ from src.utils.utils import get_full_icon_path, create_qaction_key_sequence, ena
 from src.utils.file_explorer_utils import map_shortcut_name_to_func
 from src.ui_components.file_explorer_table import FileExplorerTable
 
+
+# Shown at the left end of the breadcrumb when the path is too long to fit and its first
+# components had to be dropped - so a shortened path never looks like the whole path.
+TRUNCATION_MARKER_TEXT = "\u2026"   # a single-character ellipsis
+
+
+class ShrinkablePathButton(QPushButton):
+    """The deepest breadcrumb button, which shortens its own text rather than disappearing.
+
+    QToolBar lays every item out at its sizeHint and moves whatever doesn't fit into an
+    overflow popup - it never squeezes an item, so a smaller minimum width changes nothing.
+    In a pane too narrow even for the current folder's name that would leave the breadcrumb
+    completely empty. Eliding the text shrinks the sizeHint itself, so the folder the user
+    is in stays on screen, shortened as far as it has to be.
+    """
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.full_text = text
+
+    def _chrome_width(self) -> int:
+        # What the style adds around the text: padding, border, margins.
+        return max(0, super().sizeHint().width()
+                   - self.fontMetrics().horizontalAdvance(self.text()))
+
+    def restore_full_text(self):
+        if self.text() != self.full_text:
+            self.setText(self.full_text)
+            self.updateGeometry()
+
+    def fit_text_to(self, available: int):
+        """Elide the folder name to `available` pixels, or restore it if it now fits."""
+        metrics = self.fontMetrics()
+        room = available - self._chrome_width()
+        if room >= metrics.horizontalAdvance(self.full_text):
+            self.restore_full_text()
+            return
+        elided = metrics.elidedText(self.full_text, Qt.TextElideMode.ElideRight,
+                                    max(0, room))
+        if elided != self.text():
+            self.setText(elided)
+            self.updateGeometry()
+
+
 class TextboxNavigator(CustomSizeQToolBar):
     """
     This is the (seeming) textbox which displays the current path and allows the
@@ -69,21 +112,25 @@ class TextboxNavigator(CustomSizeQToolBar):
             for btn in self.toolbar_buttons:
                 set_object_font(btn, font_size=int(conf.TEXTBOX_FONT_SIZE),
                                 font_family=conf.TEXT_FONT)
+            # A different font size changes every button's width, so what fits changes too.
+            self._fit_path_to_width()
 
     def update_path(self, path):
         self.clear_path()
         self.add_navigation_buttons_to_toolbar(path)
         
     def clear_path(self):
-        if len(self.children()) == 0:
-            return
-        i = 0
-        while i < len(self.children()):
-            child = self.children()[i]
-            if str(type(child).__name__) in ["QPushButton", "QLabel", "QPixmap"]:
-                child.setParent(QWidget())
-            else:
-                i += 1
+        # QToolBar.clear() drops the actions as well as the widgets they wrap. Reparenting
+        # the buttons away (what this used to do) destroyed the widgets but left every
+        # previous path's QWidgetActions behind, so the toolbar's action list grew with
+        # each navigation and those empty slots took up room the current path needed.
+        self.clear()
+        self._path_segments = []
+        self._component_paths = []
+        self._leading_separator_action = None
+        self._truncation_marker = None
+        self._truncation_marker_action = None
+        self.toolbar_buttons = []
 
     def add_navigation_buttons_to_toolbar(self, path):
         buttons = []
@@ -92,10 +139,28 @@ class TextboxNavigator(CustomSizeQToolBar):
         num_paths = len(folders_in_path)
         icon = QtGui.QIcon(get_full_icon_path(conf.RIGHT_ARROWHEAD_ICON_NAME))
         self.toolbar_buttons = []
-        self.concat_separator_symbol(icon)
+        # One entry per path component, in order, holding the actions that must be shown or
+        # hidden together: the component's button plus the separator drawn after it. The
+        # leading separator is kept out of it - it always stays.
+        self._path_segments = []
+        # Full path of each component, so the marker's tooltip can name what it stands for.
+        self._component_paths = folders_in_path[:-1]
+        # Sits in front of everything, so a truncated path reads "... > Echo > Foxtrot".
+        # Hidden whenever the whole path fits (_fit_path_to_width decides).
+        self._truncation_marker = QLabel(TRUNCATION_MARKER_TEXT)
+        self._truncation_marker.setStyleSheet("padding: 5px")
+        set_object_font(self._truncation_marker, font_size=int(conf.TEXTBOX_FONT_SIZE),
+                        font_family=conf.TEXT_FONT)
+        self._truncation_marker_action = self.addWidget(self._truncation_marker)
+        self._truncation_marker_action.setVisible(False)
+        self._leading_separator_action = self.concat_separator_symbol(icon)
         for i, p in enumerate(folders_in_path):
             name = get_last_part_in_path(p)
-            button = QPushButton(name, self)
+            # The deepest component (the folder the pane is showing) is the one that must
+            # survive any width, so it gets the button that can be clipped rather than
+            # dropped. See ShrinkablePathButton.
+            button = (ShrinkablePathButton(name, self) if i == num_paths-2
+                      else QPushButton(name, self))
             if i < num_paths-1:
                 button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Maximum)
                 buttons.append(button)
@@ -110,22 +175,108 @@ class TextboxNavigator(CustomSizeQToolBar):
                 buttons.append(button)
                 buttons[i].pressed.connect(self.method_when_clicked_on_empty_area)  # pressed is similar to connect, but it doesn't wait until the mouse is released
                 buttons[i].setStyleSheet(conf.TRANSPARENT_QBUTTON)
-            self.addWidget(buttons[i])
+                # It is only a click target for the empty area, so let it shrink to nothing
+                # rather than reserving a button's worth of width the path could use.
+                buttons[i].setMinimumWidth(0)
+            action = self.addWidget(buttons[i])
+            if i < num_paths-1:
+                self._path_segments.append([action])
 
             if i < num_paths-2:
-                self.concat_separator_symbol(icon)
+                self._path_segments[i].append(self.concat_separator_symbol(icon))
 
         self.toolbar_buttons = buttons
+        self._fit_path_to_width()
+
+    @staticmethod
+    def _action_width(action) -> int:
+        widget = action.defaultWidget() if action is not None else None
+        return widget.sizeHint().width() if widget is not None else 0
+
+    def _fit_path_to_width(self):
+        """Hide leading path components until the breadcrumb fits the width it has.
+
+        A QToolBar lays its items out left to right and lets whatever doesn't fit run off
+        the right-hand edge, so a path too long for the pane used to show the root end and
+        hide the deepest folders - exactly the part that says where the user actually is.
+        Hiding components from the left instead keeps the current folder on screen. The
+        deepest component is never hidden, even when it alone is too wide. The leading
+        separator always stays, so a truncated path still opens with an arrowhead.
+        """
+        segments = getattr(self, '_path_segments', None)
+        if not segments:
+            return
+        available = self.width()
+        if available <= 0:
+            return  # not laid out yet; resizeEvent refits once it is
+        for actions in segments:
+            for action in actions:
+                action.setVisible(True)
+        marker_action = getattr(self, '_truncation_marker_action', None)
+        if marker_action is not None:
+            marker_action.setVisible(False)
+        deepest = segments[-1][0].defaultWidget()
+        if isinstance(deepest, ShrinkablePathButton):
+            # Measure against the real name; it is elided again at the end if it has to be.
+            deepest.restore_full_text()
+
+        layout = self.layout()
+        spacing = layout.spacing() if layout is not None else 0
+        margins = layout.contentsMargins() if layout is not None else None
+        needed = (margins.left() + margins.right()) if margins is not None else 0
+        needed += self._action_width(self._leading_separator_action) + spacing
+        # The empty-area button after the path can shrink but not vanish, so the width it
+        # insists on is not available to the path.
+        filler = self.toolbar_buttons[-1] if self.toolbar_buttons else None
+        if filler is not None:
+            needed += filler.minimumSizeHint().width() + spacing
+        segment_widths = [sum(self._action_width(a) + spacing for a in actions)
+                          for actions in segments]
+        needed += sum(segment_widths)
+
+        # Never hide the last component - it is the folder the pane is showing.
+        marker_width = self._action_width(marker_action) + spacing
+        last_hideable = len(segments) - 1
+        i = 0
+        while i < last_hideable and needed > available:
+            for action in segments[i]:
+                action.setVisible(False)
+            needed -= segment_widths[i]
+            i += 1
+            if i == 1:
+                # The marker only appears once something is actually dropped, and it needs
+                # room of its own - which may itself force one more component out.
+                needed += marker_width
+
+        if marker_action is not None and i > 0:
+            marker_action.setVisible(True)
+            # Name the deepest folder the marker stands for, so the hidden part is still
+            # reachable information rather than just a gap.
+            if i <= len(self._component_paths):
+                self._truncation_marker.setToolTip(self._component_paths[i - 1])
+
+        # Once nothing else can be given up, the current folder's name is shortened to
+        # whatever room is left rather than being dropped off the toolbar entirely.
+        if isinstance(deepest, ShrinkablePathButton):
+            deepest.fit_text_to(max(0, available - (needed - segment_widths[-1])))
+
+    def resizeEvent(self, event):
+        # Widening or narrowing the pane changes how much of the path fits.
+        super().resizeEvent(event)
+        self._fit_path_to_width()
 
     def concat_separator_symbol(self, sep: Union[str, QIcon]):
+        # Returns the QAction the toolbar wraps the separator in, so _fit_path_to_width can
+        # hide a separator along with the path button it belongs to.
         if isinstance(sep, str):
             label = QLabel(sep)
-            self.addWidget(label)
+            return self.addWidget(label)
         elif isinstance(sep, QIcon):
             icn = QLabel()
             icn.setPixmap(sep.pixmap(20))  # Set the path to your icon
             icn.setStyleSheet("padding: 5px")
-            self.addWidget(icn)
+            return self.addWidget(icn)
+        return None
 
 
 def set_object_font(obj, font_family=None, font_size=None):
