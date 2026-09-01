@@ -57,6 +57,15 @@ MULTISELECT_MODIFIER_MAP = {
 }
 
 
+# How hard to try to re-select what a paste just created. The names are recorded as soon as
+# the copy finishes, but the listing behind the table can still be showing the folder as it
+# was: normally the filesystem watcher's refresh brings the new items in, yet on a network
+# or WebDAV volume that event may never arrive, and waiting for it left the pasted items
+# unselected for good. So poll for them instead of depending on an event.
+KEPT_SELECTION_RETRY_MS = 150
+KEPT_SELECTION_MAX_RETRIES = 20     # roughly 3 seconds
+
+
 class FileExplorerTable(QTableView):
     def __init__(self, data_model: QtCore.QAbstractTableModel,
                  root_dir_path: str,
@@ -78,6 +87,9 @@ class FileExplorerTable(QTableView):
         # mistaken for the user picking something else.
         self._names_to_keep_selected = []
         self._reapplying_selection = False
+        # Own timer for the post-paste selection - see _attempt_kept_selection
+        self._kept_selection_timer = None
+        self._kept_selection_retries = 0
 
         self.last_selection_change_time = 0.0
         self._type_ahead_buffer = ''
@@ -120,6 +132,13 @@ class FileExplorerTable(QTableView):
         # logger.info("Resizing to " + str(xdim) + ", " + str(ydim))
         self.setStyleSheet(conf.FILE_EXPLORER_STYLE)
         self.setAlternatingRowColors(conf.FILE_EXPLORER_ALTERNATING_ROW_COLORS)
+        # QTableView wraps cell text by default, and a row is only tall enough for one
+        # line - so a long filename was laid out as wrapped text and the single visible
+        # line was cut at the last word boundary it could find, leaving the rest of the
+        # Name column empty ("for-the-purpose-of-encapsulated-..." stopping 30+ pixels
+        # short of the column edge). Without wrapping, the name runs to the edge of the
+        # column and the ellipsis lands there instead.
+        self.setWordWrap(False)
         self.delegate = MyStyledItem(self, margin=0, radius=10, border_width=1,
                                      border_color=QColor("lightgrey"))
         self.setItemDelegate(self.delegate)
@@ -339,6 +358,32 @@ class FileExplorerTable(QTableView):
             self._reapplying_selection = False
         return True
 
+    def _attempt_kept_selection(self):
+        """Select the recorded items, re-reading the directory and retrying if they are not
+        in the table yet.
+
+        _reapply_kept_selection can only match names it can actually see, and right after a
+        paste the table may still be showing the pre-paste listing. Usually the filesystem
+        watcher's refresh brings the new items in a moment later, but where that event never
+        comes nothing else would either, and the paste ended up with nothing selected. Doing
+        our own bounded re-read makes it depend on polling rather than on an event that may
+        never arrive. Stops as soon as the items are found, when the user selects something
+        else (which empties the record), or after KEPT_SELECTION_MAX_RETRIES.
+        """
+        if self._reapply_kept_selection():
+            self._kept_selection_retries = 0
+            return
+        if (len(self._names_to_keep_selected) == 0
+                or self._kept_selection_retries >= KEPT_SELECTION_MAX_RETRIES):
+            return
+        self._kept_selection_retries += 1
+        self.pandasModel.refresh_data()
+        if self._reapply_kept_selection():
+            self._kept_selection_retries = 0
+            return
+        self._kept_selection_timer = single_run_qtimer(KEPT_SELECTION_RETRY_MS,
+                                                       self._attempt_kept_selection)
+
     def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300,
                                                   clear_first=False,
                                                   keep_after_refresh=False):
@@ -346,7 +391,12 @@ class FileExplorerTable(QTableView):
             # Recorded before the timer fires, so a refresh landing inside the delay window
             # selects them too rather than being raced by it.
             self._names_to_keep_selected = list(new_items_names)
-            self.print_stuff_timer = single_run_qtimer(delay, self._reapply_kept_selection)
+            self._kept_selection_retries = 0
+            # Its own timer attribute on purpose: print_stuff_timer is overwritten by the
+            # next delayed selection, and the replaced timer object is then garbage
+            # collected mid-flight, so its callback never runs.
+            self._kept_selection_timer = single_run_qtimer(delay,
+                                                           self._attempt_kept_selection)
             return
 
         def _do_select():
