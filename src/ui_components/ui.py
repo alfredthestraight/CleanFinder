@@ -984,9 +984,11 @@ class ui(QtWidgets.QMainWindow):
 
     def set_ui_sizes(self):
         num_panes = len(self.panes)
-        self.resize(conf.LEFT_PANE_WIDTH + num_panes * conf.FILE_EXPLORER_WIDTH,
+        # EFFECTIVE_LEFT_PANE_WIDTH is 0 while the left pane is switched off, so a window
+        # opened then comes up without it (LEFT_PANE_WIDTH still holds the chosen width).
+        self.resize(conf.EFFECTIVE_LEFT_PANE_WIDTH + num_panes * conf.FILE_EXPLORER_WIDTH,
                     conf.WINDOW_HEIGHT)
-        self.subsplitter.setSizes([conf.LEFT_PANE_WIDTH,
+        self.subsplitter.setSizes([conf.EFFECTIVE_LEFT_PANE_WIDTH,
                                    num_panes * conf.FILE_EXPLORER_WIDTH])
         # If user resizes the entire window, the left pane will not be resized:
         self.subsplitter.setStretchFactor(0, 0)
@@ -1030,7 +1032,10 @@ class ui(QtWidgets.QMainWindow):
             table0 = self.panes[0].table
             conf.set_attr("WINDOW_HEIGHT", self.splitter.height())
             conf.set_attr("FILE_EXPLORER_WIDTH", table0.width())
-            conf.set_attr("LEFT_PANE_WIDTH", self.subsplitter.sizes()[0])
+            # Only while the pane is on screen - persisting the collapsed 0 would throw
+            # away the width the user picked, leaving nothing to restore on re-show.
+            if conf.SHOW_LEFT_PANE:
+                conf.set_attr("LEFT_PANE_WIDTH", self.subsplitter.sizes()[0])
             conf.set_attr("BOTTOM_TOOLBAR_HEIGHT", self.bottom_toolbar.height())
             conf.set_attr("FILE_EXPLORER_COL_WIDTH_1", table0.columnWidth(0))
             conf.set_attr("FILE_EXPLORER_COL_WIDTH_2", table0.columnWidth(1))

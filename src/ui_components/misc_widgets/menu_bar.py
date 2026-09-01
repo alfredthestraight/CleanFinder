@@ -332,17 +332,14 @@ def populate_menubar_and_connect_triggers(ui_obj: QMainWindow, menubar_manager):
     # Add actions to the edit menu
     ui_obj.configure_keyboard_shortcuts_action = QAction("Keyboard shortcuts", ui_obj)
     ui_obj.configure_styles_action = QAction("Edit configurations", ui_obj)
-    ui_obj.show_hide_left_pane = QAction("Show / Hide left pane", ui_obj)
     # ui_obj.zoom_action = QAction("Zoom", ui_obj)
 
     ui_obj.edit_menu.addAction(ui_obj.configure_keyboard_shortcuts_action)
     ui_obj.edit_menu.addAction(ui_obj.configure_styles_action)
-    ui_obj.edit_menu.addAction(ui_obj.show_hide_left_pane)
     # ui_obj.edit_menu.addAction(ui_obj.zoom_action)
 
     ui_obj.configure_styles_action.triggered.connect(menubar_manager.configure_styles)
     ui_obj.configure_keyboard_shortcuts_action.triggered.connect(menubar_manager.configure_keymap)
-    ui_obj.show_hide_left_pane.triggered.connect(menubar_manager.run_show_hide_left_pane)
 
 
 class CloseOnEscapeEventFilter(QtCore.QObject):
@@ -369,17 +366,6 @@ class MebuBarManager(QMainWindow):
 
     def configure_keyboard_shortcuts(self):
         print("configure_keyboard_shortcuts")
-
-    def run_show_hide_left_pane(self):
-        print("configure_keymap")
-        if conf.LEFT_PANE_WIDTH == 0:
-            # Restore the width it had right before it was last hidden.
-            conf.set_attr('LEFT_PANE_WIDTH', conf.LEFT_PANE_WIDTH_BEFORE_HIDE)
-        else:
-            # Remember the current width so it can be restored later, then hide.
-            conf.set_attr('LEFT_PANE_WIDTH_BEFORE_HIDE', conf.LEFT_PANE_WIDTH)
-            conf.set_attr('LEFT_PANE_WIDTH', 0)
-        self.uis_manager.show_or_hide_left_panes()
 
     def configure_keymap(self):
         print("configure_keymap")

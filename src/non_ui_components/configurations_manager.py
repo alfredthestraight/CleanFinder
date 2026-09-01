@@ -169,10 +169,9 @@ class ConfigurationsManager:
         self.FILE_EXPLORER_SHOW_ROW_NUMBERS = self.config["FILE_EXPLORER_SHOW_ROW_NUMBERS"]
         self.FILE_EXPLORER_WIDTH = self.config['FILE_EXPLORER_WIDTH']
         self.LEFT_PANE_WIDTH = self.config['LEFT_PANE_WIDTH']
-        # Remembers the width the left pane had right before "Show / Hide left pane"
-        # collapsed it to 0, so it can be restored to the same width on re-show.
-        self.LEFT_PANE_WIDTH_BEFORE_HIDE = self.config.get('LEFT_PANE_WIDTH_BEFORE_HIDE',
-                                                            self.config['LEFT_PANE_WIDTH'])
+        # Whether the left pane (favorites + folder tree) is shown. LEFT_PANE_WIDTH keeps
+        # the user's chosen width either way, so hiding and re-showing gets it back.
+        self.SHOW_LEFT_PANE = self.config.get("SHOW_LEFT_PANE", 'Y')
         self.FILE_EXPLORER_COL_WIDTH_1 = self.config['FILE_EXPLORER_COL_WIDTH_1']
         self.FILE_EXPLORER_COL_WIDTH_2 = self.config['FILE_EXPLORER_COL_WIDTH_2']
         self.FILE_EXPLORER_COL_WIDTH_3 = self.config['FILE_EXPLORER_COL_WIDTH_3']
@@ -295,6 +294,26 @@ class ConfigurationsManager:
             self._FILE_EXPLORER_SHOW_ROW_NUMBERS = True
         else:
             self._FILE_EXPLORER_SHOW_ROW_NUMBERS = False
+
+    @property
+    def EFFECTIVE_LEFT_PANE_WIDTH(self):
+        """How wide the left pane is actually drawn: 0 when it is switched off.
+
+        Not a config key - LEFT_PANE_WIDTH always holds the width the user chose, so that
+        switching SHOW_LEFT_PANE back on restores the same size.
+        """
+        return self.LEFT_PANE_WIDTH if self.SHOW_LEFT_PANE else 0
+
+    @property
+    def SHOW_LEFT_PANE(self):
+        return self._SHOW_LEFT_PANE
+
+    @SHOW_LEFT_PANE.setter
+    def SHOW_LEFT_PANE(self, value):
+        if value in ['Y', 'y']:
+            self._SHOW_LEFT_PANE = True
+        else:
+            self._SHOW_LEFT_PANE = False
 
     @property
     def FILE_EXPLORER_ALTERNATING_ROW_COLORS(self):
@@ -513,7 +532,7 @@ class ConfigurationsManager:
             "BOTTOM_TOOLBAR_HEIGHT": 200,
             "FILE_EXPLORER_WIDTH": 692,
             "LEFT_PANE_WIDTH": 203,
-            "LEFT_PANE_WIDTH_BEFORE_HIDE": 203,
+            "SHOW_LEFT_PANE": 'Y',
             "FILE_EXPLORER_COL_WIDTH_1": 273,
             "FILE_EXPLORER_COL_WIDTH_2": 174,
             "FILE_EXPLORER_COL_WIDTH_3": 90,
@@ -554,7 +573,7 @@ class ConfigurationsManager:
                 pass
         elif att in ['FILE_EXPLORER_SHOW_ROW_NUMBERS', 'FILE_EXPLORER_ALTERNATING_ROW_COLORS',
                      'FOLDERS_ALWAYS_ABOVE_FILES', 'SHOW_HIDDEN_ITEMS', 'SHOW_FAVORITES_TITLE',
-                     'DUAL_PANE_MODE']:
+                     'DUAL_PANE_MODE', 'SHOW_LEFT_PANE']:
             if new_att_value not in ['Y', 'y', 'N', 'n']:
                 pass
         elif att == 'DATE_FORMAT':
@@ -635,6 +654,7 @@ class ConfigurationsManager:
 
             {"config_keys_path": ["FILE_EXPLORER_SHOW_ROW_NUMBERS"], "display_text": "Show line numbers in table"},
             {"config_keys_path": ["FILE_EXPLORER_ALTERNATING_ROW_COLORS"], "display_text": "Use alternating row colors in table"},
+            {"config_keys_path": ["SHOW_LEFT_PANE"], "display_text": "Show the left pane - favorites and folder tree (Y/N)"},
 
             {"config_keys_path": ["fonts", "TEXT_FONT"], "display_text": "Font"},
 

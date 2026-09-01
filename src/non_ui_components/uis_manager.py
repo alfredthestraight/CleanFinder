@@ -330,10 +330,16 @@ class UiWindowManager(QMainWindow):
             w.config_upper_toolbar_text_and_dims()
             w.config_bottom_toolbar_text_and_dims()
             w.refresh_all_configurations()
+        # SHOW_LEFT_PANE is edited in the same dialog, and applying it is a resize rather
+        # than a restyle, so it has to happen here too.
+        self.show_or_hide_left_panes()
 
     def show_or_hide_left_panes(self):
+        # Collapsing to width 0 is what hides it; LEFT_PANE_WIDTH keeps the user's chosen
+        # width throughout, so switching SHOW_LEFT_PANE back on restores the same size.
         for w in self.windows:
-            w.subsplitter.setSizes([conf.LEFT_PANE_WIDTH, conf.FILE_EXPLORER_WIDTH])
+            w.subsplitter.setSizes([conf.EFFECTIVE_LEFT_PANE_WIDTH,
+                                    conf.FILE_EXPLORER_WIDTH])
 
     def on_ui_close(self, ui):
         closed_window_ind = [i for i, w in enumerate(self.windows) if id(w) == id(ui)]
