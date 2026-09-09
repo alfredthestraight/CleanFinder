@@ -1,7 +1,7 @@
 from PySide6 import QtCore
 from PySide6.QtWidgets import (QTableView, QAbstractItemView, QLineEdit, QSizePolicy, QVBoxLayout,
                                QHBoxLayout, QToolButton, QLabel, QHeaderView, QDialog,
-                               QDialogButtonBox, QStyledItemDelegate, QStyle)
+                               QDialogButtonBox, QPushButton, QStyledItemDelegate, QStyle)
 from PySide6.QtCore import Signal, QObject, QThread, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 import os
@@ -11,6 +11,40 @@ from src.utils.os_utils import run_file_in_terminal
 from src.utils.utils import enable_home_end_keys
 from src.data_models import SimplePandasModel
 from src.shared.vars import conf_manager as conf
+
+
+# The three states of the status label under the search box.
+SEARCHING_TEXT = 'Searching...'
+SEARCH_FINISHED_TEXT = 'Search finished'
+PARTIAL_RESULTS_TEXT = 'Showing partial results. Scroll to end to continue'
+
+# The two buttons at the bottom of the window. Both are styled explicitly so they look like each
+# other: an unstyled QPushButton is drawn by the native macOS style, which paints the dialog's
+# default button blue by itself. Read out of the config on every call (like the toggles above the
+# results do), so a colour changed in Edit -> Edit configurations shows up in the next window.
+def blue_button_style():
+    return """
+        QPushButton{background-color: """ + conf.WINDOWS_FILE_EXPLORER_BLUE + """;
+        color: white;
+        border: 1px solid """ + conf.WINDOWS_FILE_EXPLORER_BLUE + """;
+        padding: 4px 18px;
+        }
+        QPushButton:pressed{background-color: white;
+        color: """ + conf.WINDOWS_FILE_EXPLORER_BLUE + """;
+        }"""
+
+
+def grey_button_style():
+    # Lighter than conf.BASE_GREY_COLOR (rgb(236, 236, 236)), which sat too close to the window's
+    # own background; the border is what keeps the button readable as a button at this lightness.
+    return """
+        QPushButton{background-color: rgb(249, 249, 249);
+        color: black;
+        border: 1px solid lightgrey;
+        padding: 4px 18px;
+        }
+        QPushButton:pressed{background-color: white;
+        }"""
 
 
 def relative_paths_iterator(path: str, current_dir_only: bool = False):
@@ -48,6 +82,10 @@ def files_iterator(path: str, txt: str, case_sensitive: bool = False,
 class Worker(QObject):
     finished = Signal()
     progress = Signal(int)
+    # Emitted (with the worker itself) once a chunk has ended, so the dialog can update the
+    # status label. run() executes on a background thread and must not touch widgets - going
+    # through a signal connected to a method of the dialog gets the update onto the UI thread.
+    chunk_finished = Signal(object)
 
     def __init__(self, encompassing_obj, num_items_to_find, files_iter):
         self.encompassing_obj = encompassing_obj
@@ -90,6 +128,7 @@ class Worker(QObject):
         # of the search that replaced it.
         if not self.cancelled:
             self.encompassing_obj.quit_all_threads()
+            self.chunk_finished.emit(self)
 
 
 class NoElideDelegate(QStyledItemDelegate):
@@ -202,6 +241,18 @@ class SearchWindow_threaded(QDialog):
         self.search_row_layout.addWidget(self.current_dir_only_toggle)
         self.search_layout.addLayout(self.search_row_layout)
 
+        # Says whether the search is running, has walked the whole tree, or has paused after a
+        # chunk. Empty (and invisible) until the first search starts.
+        self.status_label = ElidingLabel('')
+        self.status_label.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.status_label.setStyleSheet("""
+            QLabel{background-color: transparent;
+            border: 1px solid transparent;
+            padding-left: 2px;
+            }""")
+        self.search_layout.addWidget(self.status_label)
+
         # Results:
         self.results_table = QTableView()
         self.results_table.setItemDelegate(NoElideDelegate())
@@ -226,10 +277,33 @@ class SearchWindow_threaded(QDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
+        # Starts the same search the Enter key starts. No focus and no auto-default, so it
+        # cannot take the Enter key away from the search box (the toggles above do the same).
+        self.search_button = QPushButton('Search')
+        self.search_button.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
+        self.search_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.search_button.setAutoDefault(False)
+        self.search_button.setStyleSheet(blue_button_style())
+        self.search_button.clicked.connect(self.on_search_button_clicked)
+
+        # Search is the window's main action, so it gets the blue; Close is the plain grey one.
+        # macOS makes Close the dialog's default button (and paints it blue), hence setDefault.
+        self.close_button = self.button_box.button(QDialogButtonBox.StandardButton.Close)
+        self.close_button.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
+        self.close_button.setAutoDefault(False)
+        self.close_button.setDefault(False)
+        self.close_button.setStyleSheet(grey_button_style())
+
+        # Search on the left of the bottom row, Close on the right.
+        self.bottom_row_layout = QHBoxLayout()
+        self.bottom_row_layout.addWidget(self.search_button)
+        self.bottom_row_layout.addStretch()
+        self.bottom_row_layout.addWidget(self.button_box)
+
         # Main layout
         self.overall_layout.addLayout(self.search_layout)
         self.overall_layout.addLayout(self.results_layout)
-        self.overall_layout.addWidget(self.button_box)
+        self.overall_layout.addLayout(self.bottom_row_layout)
 
         self.setLayout(self.overall_layout)
 
@@ -261,6 +335,8 @@ class SearchWindow_threaded(QDialog):
 
     def start_search(self):
         if self.search_box.text() == '':
+            # No search is running, so a leftover "Search finished" next to an empty box would lie.
+            self.status_label.setText('')
             return
         self.cancel_running_workers()
         self.empty_results_table()
@@ -275,6 +351,11 @@ class SearchWindow_threaded(QDialog):
         # Find the first n items (the following n items will be looked for once
         # user scrolls all the way down):
         self.next_n_items_finder_thread()
+
+    def on_search_button_clicked(self, _checked: bool = False):
+        # clicked emits the button's checked state as its first argument, so the slot has to
+        # accept it - start_search() takes none.
+        self.start_search()
 
     def on_search_option_toggled(self, _checked: bool):
         # A search already ran (or is still running) -> throw its results away and search
@@ -310,8 +391,24 @@ class SearchWindow_threaded(QDialog):
         self.worker = Worker(self, n, self.files_iter)
         self.workers.append(self.worker)
         self.worker.moveToThread(new_thread)
+        # Connected to a method of the dialog (not a lambda): the dialog lives on the UI thread,
+        # so Qt queues the signal onto it instead of running the slot on the worker's thread.
+        self.worker.chunk_finished.connect(self.on_chunk_finished)
         new_thread.started.connect(self.worker.run)
+        # This is the single place a chunk begins - both the first one and the ones started by
+        # scrolling to the end of the results.
+        self.status_label.setText(SEARCHING_TEXT)
         new_thread.start()
+
+    def on_chunk_finished(self, worker):
+        """A chunk of results has just ended: either the whole tree was walked, or the chunk
+        filled up and the search is waiting for the user to scroll down for more."""
+        # The signal is queued, so one emitted by an abandoned search can arrive after a new
+        # search has already started - that one must not overwrite the new search's status.
+        if worker is not self.worker or worker.cancelled:
+            return
+        self.status_label.setText(SEARCH_FINISHED_TEXT if self.search_finished
+                                  else PARTIAL_RESULTS_TEXT)
 
     def quit_all_threads(self):
         for thread in self.threads.keys():

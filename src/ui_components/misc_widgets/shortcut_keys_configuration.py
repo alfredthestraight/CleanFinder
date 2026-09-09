@@ -49,12 +49,18 @@ class LabelWithXButton(QDialog):
                            "border-radius: 5px;"
                            "border: grey;}")
 
-        self.close_btn.clicked.connect(self.close)
+        self.close_btn.clicked.connect(self.remove_from_category)
 
     def set_text(self, new_text: str):
         self.label.setText(new_text)
 
-    def close(self):
+    def remove_from_category(self):
+        """Deliberately not named `close`. PySide decides whether `self.<name>` in a connect()
+        means the Python method or the C++ slot of the same name (QWidget::close here) by
+        inspecting the attribute, and it does not recognise a Nuitka-compiled function as an
+        override - so when this module is imported from its compiled .so the button was wired
+        straight to QWidget::close: the label hid, break_thread_run never fired, and the removal
+        was never recorded in the keymap. A name with no C++ counterpart cannot be short-cut."""
         self.break_thread_run.emit(self.label.text(), self.category_name)
         self.accept()
 
@@ -82,7 +88,7 @@ class DraggableFrame(QFrame):
         source_label = event.source()
         if source_label and isinstance(source_label, LabelWithXButton):
             if self.name != source_label.category_name:
-                source_label.close()
+                source_label.remove_from_category()
                 self.encompassing_obj.add_value_label_to_category(
                     self.name, source_label.label.text())
                 event.acceptProposedAction()   # NOTE: this cancels the dragging-back animation

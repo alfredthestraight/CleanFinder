@@ -7,7 +7,8 @@ from src.shared.vars import conf_manager as conf, logger as logger
 from src.utils.os_utils import (open_application, extract_filename_from_path, delete_item,
                                 move_to_trash, extract_extension_from_path, dir_,
                                 TRASH_UNAVAILABLE)
-from src.utils.utils import get_max_integer_suffix_among_strings_with_prefix
+from src.utils.utils import (get_max_integer_suffix_among_strings_with_prefix,
+                             enable_home_end_keys)
 from src.shared.vars import threads_server
 from PySide6.QtWidgets import (QMessageBox, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDialog,
                                QVBoxLayout)
@@ -307,7 +308,9 @@ class MyStyledItem(QtWidgets.QStyledItemDelegate):
         self.editor.setContentsMargins(24, 5, 1, 5)   # left, top, rightd, bottom
         self.editor.setFont(QFont(conf.TEXT_FONT, conf.TEXT_FONT_SIZE))
         self.editor.setStyleSheet(conf.RENAME_TEXTBOX_STYLE)
-        self.editor.installEventFilter(self.editor)
+        # Home / End (and their Shift variants) do nothing in a QLineEdit on macOS - the same
+        # helper the path textbox and the search box use makes them work here too.
+        enable_home_end_keys(self.editor)
         return self.editor
 
     def updateEditorGeometry(self, editor, option, index):
@@ -327,10 +330,6 @@ class MyStyledItem(QtWidgets.QStyledItemDelegate):
         if (qtype == QtCore.QEvent.Type.KeyPress):
             if event.key() == Qt.Key.Key_Escape:
                 self.editingFinishedSignal.emit('___User_clicked_esc___', '___User_clicked_esc___')
-            if event.key() == QtCore.Qt.Key.Key_End:
-                self.editor.setCursorPosition(len(self.editor.text()))
-            if event.key() == QtCore.Qt.Key.Key_Home:
-                self.editor.setCursorPosition(0)
         return super().eventFilter(obj, event)
 
 
