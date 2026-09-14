@@ -2,7 +2,7 @@ import os
 import zipfile
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtGui import QFont, QColor, QBrush, QCursor
-from PySide6.QtCore import Qt, QItemSelectionModel, Signal, QThread, QTimer
+from PySide6.QtCore import Qt, QItemSelectionModel, Signal, QObject, QThread, QTimer
 from src.shared.vars import conf_manager as conf, logger as logger
 from src.utils.os_utils import (open_application, extract_filename_from_path, delete_item,
                                 move_to_trash, extract_extension_from_path, dir_,
@@ -367,7 +367,22 @@ class DeletionThread(QThread):
 
 
 
-class ItemsZipper:
+# What ItemsZipThread.zip_items returns, and what ItemsZipper.zipping_finished receives
+ZIP_OK = 1
+ZIP_FAILED = -1
+ZIP_CANCELLED = -2
+
+
+class ItemsZipper(QObject):
+    """
+    Runs a zip on a background thread and owns the message box shown while it runs.
+
+    A QObject, and built on the UI thread, so that the zip thread's finished signal is delivered
+    to zipping_finished as a queued call on the UI thread - that method builds and closes widgets,
+    which Qt only allows there. PySide6 happens to give the same guarantee to a plain Python
+    callable (it connects through an internal receiver created on the connecting thread), but
+    that is an implementation detail; being a QObject states it outright.
+    """
 
     def __init__(self, items_paths, zip_dest_file_path, recursive=True, user_communications_ui=None):
         super().__init__()
@@ -385,16 +400,24 @@ class ItemsZipper:
         self.timer.timeout.connect(self.show_message_box)
         self.timer.start(1000)  # Timeout every 1 second unless stopped explicitly
 
+    def cancel(self):
+        """Asks the zip to stop. Wired to the Cancel button of the "Zipping item(s)" box, and
+        called for every running zip when the app is closed."""
+        self.zipper_thread.stop()
+
     def show_message_box(self):
         if self.timer.isActive():
             self.timer.stop()
             if self.user_communications_ui:
                 self.user_communications_ui({'call_type': 'show_prompt_message',
-                                             'msg': "Zipping item(s)",
-                                             'caller_id': id(self)})
+                                             'msg': "Zipping item(s)...",
+                                             'caller_id': id(self),
+                                             'on_cancel': self.cancel})
             self.message_box_shown = True
 
     def zipping_finished(self, success):
+        logger.info(f"ItemsZipper.zipping_finished ({success})")
+        self.zipping_ended = True
         if self.timer.isActive():
             self.timer.stop()
         if self.message_box_shown:
@@ -402,6 +425,13 @@ class ItemsZipper:
                 self.user_communications_ui({'call_type': 'remove_prompt_message',
                                              'caller_id': id(self)})
             self.message_box_shown = False
+        # A cancelled zip (-2) is what the user just asked for, so it passes without a word
+        if success == ZIP_FAILED and self.user_communications_ui:
+            self.user_communications_ui({
+                'call_type': 'show_error_message',
+                'title': "Zipping failed",
+                'msg': f"Could not create {self.zipper_thread.zip_dest_file_path}.\n"
+                       f"See the log for the reason."})
 
 
 class ItemsZipThread(QThread):
@@ -418,27 +448,71 @@ class ItemsZipThread(QThread):
         self.recursive = recursive
         self.currently_running = False
         self.user_communications_ui = user_communications_ui
+        # Set from the UI thread by stop(). Checked before every entry written into the archive,
+        # the same way PasteItemsThread checks its own flag before every file copied.
+        self._forced_to_stop = False
+
+    def stop(self):
+        """Asks the zip to abort. Safe to call from the UI thread - it never blocks."""
+        self._forced_to_stop = True
 
     def run(self):
         self.currently_running = True
+        logger.info(f"ItemsZipThread: zipping {len(self.items_paths)} item(s) into "
+                    f"{self.zip_dest_file_path}")
         success = self.zip_items(self.items_paths, self.zip_dest_file_path, self.recursive)
+        logger.info(f"ItemsZipThread finished ({success})")
         self.finished.emit(success)
         self.currently_running = False
 
+    def _entries_to_write(self, item_paths: list[str], recursive: bool):
+        """
+        Yields (path on disk, name inside the archive) in the order they are written. The name is
+        None where zipfile's default should be used.
+
+        Kept exactly as it has always been: a selected item goes in under its own basename, while
+        everything found underneath it goes in under the name zipfile derives from the full path.
+        The two are inconsistent, but changing that would change the layout of every archive the
+        app has ever produced.
+        """
+        for item_path in item_paths:
+            yield item_path, os.path.basename(item_path)
+            if recursive:
+                for root, dirs, files in os.walk(item_path):
+                    for name in files + dirs:
+                        yield os.path.join(root, name), None
+
+    def _discard_partial_archive(self, zip_dest_file_path: str):
+        """Removes the half-written archive of a cancelled zip, so a cancel leaves nothing
+        behind (copy_tree_with_progress does the same for a cancelled paste)."""
+        try:
+            if os.path.exists(zip_dest_file_path):
+                os.remove(zip_dest_file_path)
+        except OSError:
+            logger.exception(f"Could not remove the partial archive {zip_dest_file_path}")
+
     def zip_items(self, item_paths: list[str], zip_dest_file_path: str, recursive: bool):
+        """Returns 1 zipped, -1 error, -2 cancelled (partial archive removed)."""
+        cancelled = False
         try:
             with zipfile.ZipFile(zip_dest_file_path, 'w') as zipf:
-                for item_path in item_paths:
-                    zipf.write(item_path, os.path.basename(item_path))
-                    if recursive:
-                        for root, dirs, files in os.walk(item_path):
-                            for file in files:
-                                zipf.write(os.path.join(root, file))
-                            for directory in dirs:
-                                zipf.write(os.path.join(root, directory))
-            return 1
-        except:
-            return -1
+                for path, arcname in self._entries_to_write(item_paths, recursive):
+                    if self._forced_to_stop:
+                        cancelled = True
+                        break
+                    if arcname is None:
+                        zipf.write(path)
+                    else:
+                        zipf.write(path, arcname)
+        except Exception:
+            # Without this the reason was lost: the caller only ever saw -1
+            logger.exception(f"ItemsZipThread failed to zip into {zip_dest_file_path}")
+            return ZIP_FAILED
+
+        if cancelled:
+            self._discard_partial_archive(zip_dest_file_path)
+            return ZIP_CANCELLED
+        return ZIP_OK
 
 
 class PrefixSuffixChangeInSelectedItems(QDialog):

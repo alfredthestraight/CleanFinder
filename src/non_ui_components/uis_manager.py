@@ -29,6 +29,13 @@ class PastingDelegate:
 
     def paste_items(self, dest_path: str, copied_file_paths, delete_source_after_paste: bool,
                     rename_item_names_in_dest: list[tuple[str, str]] = []):
+        if delete_source_after_paste:
+            # Moving an item into the folder it is already in does nothing, as in Finder
+            copied_file_paths = [f for f in copied_file_paths
+                                 if extract_parent_path_from_path(f) != os.path.normpath(dest_path)]
+            if len(copied_file_paths) == 0:
+                logger.info(f"paste_items --> every item is already in {dest_path}, nothing to move")
+                return
         source_path = extract_parent_path_from_path(copied_file_paths[0])
         logger.info(f"paste_items --> source_path = {source_path}, dest_path = {dest_path}")
         if source_path == dest_path:
@@ -341,6 +348,15 @@ class UiWindowManager(QMainWindow):
             w.subsplitter.setSizes([conf.EFFECTIVE_LEFT_PANE_WIDTH,
                                     conf.FILE_EXPLORER_WIDTH])
 
+    def cancel_zipping_threads(self, windows):
+        """Asks every running zip to stop. Zips are not tracked centrally the way pastes are -
+        each table keeps its own in zipping_threads - so they are collected from the windows.
+        Called on the way out, so a long zip on a slow volume does not hold the app open."""
+        for w in windows:
+            for table in w.all_tables():
+                for zipper in table.zipping_threads:
+                    zipper.cancel()
+
     def on_ui_close(self, ui):
         closed_window_ind = [i for i, w in enumerate(self.windows) if id(w) == id(ui)]
         closed_window = self.windows.pop(closed_window_ind[0])
@@ -349,6 +365,7 @@ class UiWindowManager(QMainWindow):
         self.windows = [w for w in self.windows if id(w) != id(ui)]
         if len(self.windows) == 0:
             self.pasting_delegate.safetly_kill_all_threads()
+            self.cancel_zipping_threads([closed_window])
             conf.save_config_to_file()
             self.save_columns_sorting_scheme_per_path(RESULTS_PATH)
             print("Bye bye")

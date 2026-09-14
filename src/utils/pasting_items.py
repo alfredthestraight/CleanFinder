@@ -8,12 +8,12 @@ from PySide6.QtCore import Signal, QThread, QMargins, QTimer, QFileSystemWatcher
 from PySide6.QtWidgets import QMainWindow, QTableWidget, QTableWidgetItem, QRadioButton, QWidget,\
     QHBoxLayout, QButtonGroup, QVBoxLayout, QPushButton, QCheckBox, QFrame, QScrollArea, QLabel,\
     QProgressBar
-from src.utils.os_utils import move_to_trash, extract_filename_from_path, count_tree, \
-    volume_of_path, TRASH_UNAVAILABLE, \
+from src.utils.os_utils import extract_filename_from_path, count_tree, \
+    move_item, is_same_volume, MOVE_SOURCE_NOT_REMOVED, \
     copy_tree_with_progress, get_all_item_names_in_directory, extract_parent_path_from_path, \
     increment_max_item_name, delete_item, size_bytes_to_string
 from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons, \
-    prompt_trash_unavailable
+    prompt_message
 from src.non_ui_components.user_actions import (UserAction_CopyPasteItemsUsingThread,
                                                 UserAction_MoveFilesUsingThread)
 from src.shared.vars import logger as logger
@@ -320,12 +320,18 @@ class PasterObject(QWidget):
                 self.dialog.move(self.position_on_screen)
             self.dialog.show()
 
-        # A move whose sources couldn't be trashed copied the items over but left the
-        # originals behind - say so, rather than letting the move look like it worked.
-        sources_not_trashed = result.get('sources_not_trashed', [])
-        if len(sources_not_trashed) > 0:
-            prompt_trash_unavailable(volume_of_path(sources_not_trashed[0]),
-                                     len(sources_not_trashed))
+        # A move to another volume whose originals couldn't be deleted left the items in both
+        # places - say so, rather than letting the move look like it worked.
+        sources_not_removed = result.get('sources_not_removed', [])
+        if len(sources_not_removed) > 0:
+            shown = sources_not_removed[:5]
+            more = len(sources_not_removed) - len(shown)
+            prompt_message(
+                title_text="Originals were not removed",
+                message_text=(f"{len(sources_not_removed)} item(s) were copied to the destination, "
+                              f"but the originals could not be deleted:\n\n"
+                              + "\n".join(shown)
+                              + (f"\n... and {more} more" if more > 0 else "")))
 
         # A cancelled paste still pasted whatever it got through before stopping, so it is
         # recorded for undo exactly like a completed one
@@ -385,10 +391,9 @@ class PasteItemsThread(QThread):
         items_skipped = []
         items_not_pasted = []
         items_pasted = []
-        # Sources a move (cut + paste) copied over but could not remove, because their
-        # volume has no Trash. Reported once at the end so the move doesn't silently
-        # turn into a copy.
-        sources_not_trashed = []
+        # Sources a move (cut + paste) to another volume copied over but could not delete.
+        # Reported once at the end so the move doesn't silently turn into a copy.
+        sources_not_removed = []
         result = {'call_type': 'finished_all'}
 
         try:
@@ -396,11 +401,20 @@ class PasteItemsThread(QThread):
             # every source tree, which is exactly why it belongs here and not on the UI thread.
             files_total = 0
             bytes_total = 0
-            for src, _dest, _when_conflicting in self.source_dest_pairs:
+            for src, dest, _when_conflicting in self.source_dest_pairs:
                 if self._forced_to_stop:
                     break
-                if os.path.exists(src):
-                    num_files, num_bytes = count_tree(src)
+                if (self.delete_source_after_paste and
+                        is_same_volume(src, extract_parent_path_from_path(dest))):
+                    # A move within one volume is a single rename, whatever the item's size -
+                    # walking its tree would only waste time
+                    files_total += 1
+                elif os.path.exists(src):
+                    # The stop flag is polled inside the walk too: one pasted folder is a single
+                    # source item, so without this a cancel could not be noticed until the whole
+                    # tree had been counted.
+                    num_files, num_bytes = count_tree(
+                        src, should_stop=lambda: self._forced_to_stop)
                     files_total += num_files
                     bytes_total += num_bytes
 
@@ -448,9 +462,12 @@ class PasteItemsThread(QThread):
                 # Perform the actual pasting
                 success = 0  # Nothing happened
                 if src != dest:
-                    success = copy_tree_with_progress(src, dest,
-                                                      should_stop=lambda: self._forced_to_stop,
-                                                      on_file_done=on_file_done)
+                    # Cut + paste moves (a rename on the same volume); copy + paste copies
+                    transfer = move_item if self.delete_source_after_paste \
+                        else copy_tree_with_progress
+                    success = transfer(src, dest,
+                                       should_stop=lambda: self._forced_to_stop,
+                                       on_file_done=on_file_done)
 
                 if success == -2:
                     # Cancelled part-way through this item; its partial copy has been removed
@@ -460,13 +477,13 @@ class PasteItemsThread(QThread):
                     result = {'call_type': 'paste_error', 'item_name': filename}
                     break
 
-                if success == 1:
+                if success == MOVE_SOURCE_NOT_REMOVED:
+                    items_pasted.append((src, dest))
+                    sources_not_removed.append(src)
+                elif success == 1:
                     items_pasted.append((src, dest))
                 elif success == 0:
                     items_not_pasted.append((src, dest))
-                if self.delete_source_after_paste:
-                    if move_to_trash(src) == TRASH_UNAVAILABLE:
-                        sources_not_trashed.append(src)
 
             self.progress.emit(self._files_done, files_total, self._bytes_done, bytes_total)
 
@@ -482,7 +499,7 @@ class PasteItemsThread(QThread):
             result.update({'items_skipped': items_skipped,
                            'items_not_pasted': items_not_pasted,
                            'items_pasted': items_pasted,
-                           'sources_not_trashed': sources_not_trashed})
+                           'sources_not_removed': sources_not_removed})
             self.results_queue.put(result)
 
 

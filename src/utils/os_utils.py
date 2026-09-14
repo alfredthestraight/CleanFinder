@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Callable
 import os
+import errno
 import stat
 import shutil
 import shlex
@@ -785,15 +786,24 @@ def copy_item(item_full_path: str, dest_item_full_path: str):
         return -1
 
 
-def count_tree(src: str) -> tuple[int, int]:
+def count_tree(src: str, should_stop: Callable[[], bool] = None) -> tuple[int, int]:
     """
     Counts the files under <src> and their total size in bytes, so a copy can report progress
     against a known total. Recurses with os.scandir and never follows directory symlinks.
     Returns (num_files, total_bytes). Unreadable entries are skipped rather than raising - the
     total is only used to drive a progress bar.
+
+    should_stop() - polled while walking; returning True ends the walk early and returns the
+    partial counts. Without it, counting a big folder on a slow volume (a network share, or a
+    Cryptomator vault, where every entry is a round trip) is one uninterruptible job, and a paste
+    cancelled during it only stops once the whole walk is done - minutes later.
     """
     num_files = 0
     total_bytes = 0
+
+    def _stop() -> bool:
+        return should_stop is not None and should_stop()
+
     if not os.path.isdir(src) or os.path.islink(src):
         try:
             return 1, os.lstat(src).st_size
@@ -802,10 +812,16 @@ def count_tree(src: str) -> tuple[int, int]:
 
     dirs_to_visit = [src]
     while dirs_to_visit:
+        if _stop():
+            break
         current_dir = dirs_to_visit.pop()
         try:
             with os.scandir(current_dir) as entries:
                 for entry in entries:
+                    # Listing one directory is the longest step that cannot be interrupted, so
+                    # this is as responsive as the walk can be made
+                    if _stop():
+                        return num_files, total_bytes
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             dirs_to_visit.append(entry.path)
@@ -983,6 +999,71 @@ def move_to_trash(item_path: str):
                        f"({e}); '{item_path}' was left alone")
         return TRASH_UNAVAILABLE
     return TRASH_OK
+
+
+# move_item outcome, on top of copy_tree_with_progress's 1 / 0 / -1 / -2: the item was copied to
+# another volume but the original could not be deleted, so it now exists in both places
+MOVE_SOURCE_NOT_REMOVED = 2
+
+
+def is_same_volume(src: str, dest_dir: str) -> bool:
+    """True when <src> and the folder <dest_dir> are on the same volume, i.e. moving between them
+    is a rename rather than a copy. Only a hint - move_item finds out for itself either way."""
+    try:
+        return os.lstat(src).st_dev == os.stat(dest_dir).st_dev
+    except OSError:
+        return False
+
+
+def move_item(src: str,
+              dest: str,
+              should_stop: Callable[[], bool] = None,
+              on_file_done: Callable[[int], None] = None) -> int:
+    """
+    Moves <src> to <dest> the way Finder does: a rename when both are on the same volume, which is
+    instant however big the item is. Only when the rename is refused because <dest> is on another
+    volume (EXDEV) is the item copied with copy_tree_with_progress, and the original then deleted
+    permanently - but only after the copy fully succeeded.
+
+    <dest> must not exist: conflicts are resolved by the caller, and os.rename would otherwise
+    silently overwrite a file sitting there.
+
+    Returns 1 moved, 0 nothing to do, -1 error (source untouched), -2 aborted during a cross-volume
+    copy (source untouched, partial copy removed), MOVE_SOURCE_NOT_REMOVED copied but the
+    original could not be deleted.
+    """
+    if src == dest:
+        return 0
+    if not os.path.lexists(src):
+        return -1
+    if os.path.lexists(dest):
+        logger.error(f"move_item: destination {dest} already exists")
+        return -1
+
+    try:
+        os.rename(src, dest)
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            # e.g. EINVAL when moving a folder into its own subfolder
+            logger.exception(f"move_item failed to move {src} -> {dest}")
+            return -1
+    else:
+        if on_file_done is not None:
+            on_file_done(0)
+        return 1
+
+    # Different volume: copy, then remove the original
+    result = copy_tree_with_progress(src, dest, should_stop=should_stop, on_file_done=on_file_done)
+    if result != 1:
+        return result
+    try:
+        removed = delete_item(src)
+    except Exception:
+        removed = -1
+    if removed != 1:
+        logger.error(f"move_item copied {src} -> {dest} but could not delete the original")
+        return MOVE_SOURCE_NOT_REMOVED
+    return 1
 
 
 def create_file(full_file_path: str):

@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget
-from src.ui_components.misc_widgets.dialogs_and_messages import TextMessageBoxNoBottons
+from src.ui_components.misc_widgets.dialogs_and_messages import QDialogFreeTextButtons
 
 
 class ThreadsUiServer(QWidget):
@@ -21,15 +21,30 @@ class ThreadsUiServer(QWidget):
 
     def __call__(self, params):
         if params['call_type'] == 'show_prompt_message':
-            msg = TextMessageBoxNoBottons('Zipping', 'Zipping files...')
+            # A Cancel button, so a long job (zipping a big folder onto a slow volume) can be
+            # stopped. The dialog's own handler closes it; 'on_cancel' is what stops the job.
+            msg = QDialogFreeTextButtons(button_texts=['Cancel'],
+                                         title_text=params.get('title', 'Zipping'),
+                                         message_text=params.get('msg', 'Zipping files...'),
+                                         btn_width=90)
+            on_cancel = params.get('on_cancel')
+            if on_cancel is not None:
+                msg.buttons['Cancel'].clicked.connect(on_cancel)
             self.message_boxes[params['caller_id']] = msg
             msg.open()
 
         if params['call_type'] == 'remove_prompt_message':
-            try:
-                self.message_boxes.pop(params['caller_id'])
-            except KeyError:
-                pass
+            # Closed, not just dropped: forgetting the last reference leaves the window on screen
+            # until Python happens to collect it.
+            msg = self.message_boxes.pop(params['caller_id'], None)
+            if msg is not None:
+                msg.close()
 
-
-
+        if params['call_type'] == 'show_error_message':
+            # A background job that failed has no other way to say so - it cannot build widgets
+            # of its own.
+            msg = QDialogFreeTextButtons(button_texts=['OK'],
+                                         title_text=params.get('title', 'Error'),
+                                         message_text=params.get('msg', ''),
+                                         btn_width=90)
+            msg.exec()
