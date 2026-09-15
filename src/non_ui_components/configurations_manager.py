@@ -192,6 +192,9 @@ class ConfigurationsManager:
         self.FAVORITES_DOCUMENTS_ICON = self.config["icons"]['FAVORITES_DOCUMENTS_ICON']
         self.BASIC_FAVORITES_DICT = self.config["BASIC_FAVORITES_DICT"]
         self.NEW_FOLDER_NAME_TEMPLATE = self.config["NEW_FOLDER_NAME_TEMPLATE"]
+        # Folder the bookmarks' "Change icon" dialog opens in - wherever the last icon was picked
+        # from. Empty means the system icons folder. .get so older config files still load.
+        self.LAST_ICON_SELECTION_DIR = self.config.get("LAST_ICON_SELECTION_DIR", "")
         # Modifier key for click-to-multiselect: command / control / option / shift
         self.MULTISELECT_MODIFIER = self.config.get("MULTISELECT_MODIFIER", "option")
         self.PAGE_DOWN_UP_NUM_ROWS = self.config["PAGE_DOWN_UP_NUM_ROWS"]
@@ -336,6 +339,7 @@ class ConfigurationsManager:
             "FOLDERS_ALWAYS_ABOVE_FILES": "Y",
             "SHOW_HIDDEN_ITEMS": "N",
             "DUAL_PANE_MODE": "N",
+            "LAST_ICON_SELECTION_DIR": "",
             "scrollbar": {
                 "SCROLLBAR_COLOR": "rgb(200, 207, 210)",
                 "SCROLLBAR_BACKGROUND_COLOR": "rgb(250, 250, 250)",
@@ -576,6 +580,9 @@ class ConfigurationsManager:
                      'DUAL_PANE_MODE', 'SHOW_LEFT_PANE']:
             if new_att_value not in ['Y', 'y', 'N', 'n']:
                 pass
+        elif att == 'LAST_ICON_SELECTION_DIR':
+            if not isinstance(new_att_value, str):
+                return
         elif att == 'DATE_FORMAT':
             try:
                 datetime.datetime.today().strftime(str(new_att_value))

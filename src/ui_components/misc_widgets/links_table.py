@@ -234,15 +234,22 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         self.change_icon(default_icon_path)
 
     def select_new_icon(self):
+        # Open where the previous icon was picked from; fall back to the system icons folder on
+        # first use, or if that folder has since been deleted or its volume unmounted
+        start_dir = conf.LAST_ICON_SELECTION_DIR
+        if not start_dir or not os.path.isdir(start_dir):
+            start_dir = SYSTEM_DEFAULT_ICONS_DIR
         self.icon_selection = QFileDialog()
         # Open dialog box and wait for user selection
         icon_file_path, _ = \
             self.icon_selection.getOpenFileName(self,
                                                 "Select icon",
-                                                SYSTEM_DEFAULT_ICONS_DIR,
+                                                start_dir,
                                                 options=QFileDialog.Option.DontResolveSymlinks)
         if icon_file_path == '':
             return
+        # Written to config.json along with the rest of the config when the last window closes
+        conf.set_attr('LAST_ICON_SELECTION_DIR', os.path.dirname(icon_file_path))
         self.change_icon(icon_file_path)
 
     def change_icon(self, new_icon_full_path: str):
