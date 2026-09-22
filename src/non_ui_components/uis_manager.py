@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QFileSystemModel, QMainWindow
 from src.shared.locations import SYSTEM_ROOT_DIR, RESULTS_PATH
 from src.shared.vars import conf_manager as conf, logger as logger
 from src.utils.os_utils import get_clipboard_copied_files_paths, extract_filename_from_path, \
@@ -113,6 +113,14 @@ class UiWindowManager(QMainWindow):
         self._cut_items_path = ''
         self.historical_actions = UserActionsManager()
         self.pasting_delegate = PastingDelegate(self)
+
+        # One folder-tree model for every window's left-pane tree. Each QFileSystemModel runs a
+        # background thread (QFileInfoGatherer) that reads directories, and a per-window model
+        # kept that thread and its file-system watches alive for as long as the closed window's
+        # Python objects survived. Every tree shows the same root with the same filter, and each
+        # QTreeView keeps its own expanded/selected state, so one shared model is enough.
+        self.folders_tree_model = QFileSystemModel()
+        self.folders_tree_model.setRootPath(SYSTEM_ROOT_DIR)
 
         is_ascending_per_col = {}
         for k in conf.get(['sorting', 'is_ascending_per_col']).keys():
@@ -279,7 +287,8 @@ class UiWindowManager(QMainWindow):
                     root_dir_path=root_dir_path,
                     height=ydim,
                     file_explorer_width=file_explorer_width, left_pane_width=left_pane_width,
-                    columns_ordering_scheme=self.get_columns_ordering_scheme(root_dir_path))
+                    columns_ordering_scheme=self.get_columns_ordering_scheme(root_dir_path),
+                    folders_tree_model=self.folders_tree_model)
         new_ui.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         time.sleep(0.1)

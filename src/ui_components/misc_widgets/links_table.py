@@ -239,13 +239,14 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         start_dir = conf.LAST_ICON_SELECTION_DIR
         if not start_dir or not os.path.isdir(start_dir):
             start_dir = SYSTEM_DEFAULT_ICONS_DIR
-        self.icon_selection = QFileDialog()
-        # Open dialog box and wait for user selection
+        # Open dialog box and wait for user selection. getOpenFileName is a static method that
+        # builds its own dialog, so no instance is kept here - one used to be stored on self and
+        # then never released.
         icon_file_path, _ = \
-            self.icon_selection.getOpenFileName(self,
-                                                "Select icon",
-                                                start_dir,
-                                                options=QFileDialog.Option.DontResolveSymlinks)
+            QFileDialog.getOpenFileName(self,
+                                        "Select icon",
+                                        start_dir,
+                                        options=QFileDialog.Option.DontResolveSymlinks)
         if icon_file_path == '':
             return
         # Written to config.json along with the rest of the config when the last window closes

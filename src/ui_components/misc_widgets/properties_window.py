@@ -282,11 +282,12 @@ class PropertiesWindowSingleItem(PropertiesWindowCalculateSizeInThread):
         self.setLayout(self.main_layout)
 
     def change_extension_icon(self):
-        self.default_app_selection = QFileDialog()
+        # Static method: it builds its own dialog, so nothing is stored on self (an unused
+        # QFileDialog used to be kept there for the lifetime of this window)
         img_file_path, _ = \
-            self.default_app_selection.getOpenFileName(self, "Select app",
-                                                       SYSTEM_DEFAULT_ICONS_DIR,
-                                                       options=QFileDialog.Option.DontResolveSymlinks)
+            QFileDialog.getOpenFileName(self, "Select app",
+                                        SYSTEM_DEFAULT_ICONS_DIR,
+                                        options=QFileDialog.Option.DontResolveSymlinks)
         self.new_icon_src_path = img_file_path
         if self.new_icon_src_path == '':  # If the user cancels the selection
             return

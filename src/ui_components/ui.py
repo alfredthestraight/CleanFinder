@@ -373,9 +373,13 @@ class ui(QtWidgets.QMainWindow):
 
     def __init__(self, encompassing_uis_manager, root_dir_path,
                  height, file_explorer_width, left_pane_width,
-                 columns_ordering_scheme=None, parent=None):
+                 columns_ordering_scheme=None, parent=None, folders_tree_model=None):
         super().__init__(parent)
         logger.info("ui initialization")
+        # Shared between all windows and owned by the manager (see UiWindowManager.__init__).
+        # None only in tests, where TreeFileExplorer then builds one of its own.
+        self.folders_tree_model = folders_tree_model
+        self._is_closing = False
         self.file_explorer_width = file_explorer_width
         self.left_pane_width = left_pane_width
         self.height = height
@@ -439,7 +443,8 @@ class ui(QtWidgets.QMainWindow):
         self.favorites_area.addStretch(1)
 
         self.tree_area = QVBoxLayout(self.trees_subsplitter)
-        self.tree = TreeFileExplorer(parent=self.trees_subsplitter, encompassing_ui=self)
+        self.tree = TreeFileExplorer(model=self.folders_tree_model,
+                                     parent=self.trees_subsplitter, encompassing_ui=self)
         self.tree.expandAll()
         self.tree_area.addWidget(self.tree)
 
@@ -1043,7 +1048,29 @@ class ui(QtWidgets.QMainWindow):
             conf.set_attr("FILE_EXPLORER_COL_WIDTH_4", table0.columnWidth(3))
 
     def on_close(self):
+        self.release_resources()
         self.encompassing_uis_manager.on_ui_close(self)
+
+    def release_resources(self):
+        """Give up everything this window holds, while its widgets are still valid.
+
+        Qt deletes the window's C++ objects after closeEvent (the window is created with
+        WA_DeleteOnClose), but the Python objects survive until the garbage collector gets to
+        them - and they are tied together in reference loops (window -> table -> encompassing_ui),
+        so that can be much later. Until then a closed window still held a running directory
+        watcher, timers, a folder-tree model with its own background thread, and any open
+        properties windows. Freeing them here means closing a window actually releases them,
+        whenever Python gets around to freeing the objects themselves.
+        """
+        logger.info("ui.release_resources")
+        self._is_closing = True
+        self._allow_structure_updates = False
+        for t in self.all_tables():
+            t.release_resources()
+        # The model is shared with the other windows and outlives this one, so only this view's
+        # link to it is dropped
+        self.tree.setModel(None)
+        self.tree.model = None
 
     def keyPressEvent(self, e):
         self.file_explorer.keyPressEvent(e)
