@@ -320,6 +320,19 @@ class PasterObject(QWidget):
                 self.dialog.move(self.position_on_screen)
             self.dialog.show()
 
+        # Items that were not where the paste was told to look. Saying so beats a paste that
+        # appears to do nothing.
+        items_missing = result.get('items_missing', [])
+        if len(items_missing) > 0:
+            shown = items_missing[:5]
+            more = len(items_missing) - len(shown)
+            prompt_message(
+                title_text="Nothing to paste",
+                message_text=(f"{len(items_missing)} item(s) could not be found, so they were "
+                              f"not pasted. They may have been moved, renamed or deleted:\n\n"
+                              + "\n".join(shown)
+                              + (f"\n... and {more} more" if more > 0 else "")))
+
         # A move to another volume whose originals couldn't be deleted left the items in both
         # places - say so, rather than letting the move look like it worked.
         sources_not_removed = result.get('sources_not_removed', [])
@@ -394,6 +407,9 @@ class PasteItemsThread(QThread):
         # Sources a move (cut + paste) to another volume copied over but could not delete.
         # Reported once at the end so the move doesn't silently turn into a copy.
         sources_not_removed = []
+        # Sources that are no longer on disk. Skipping them without a word is what made a paste
+        # of a path the clipboard had mangled look like nothing happened at all.
+        items_missing = []
         result = {'call_type': 'finished_all'}
 
         try:
@@ -437,7 +453,10 @@ class PasteItemsThread(QThread):
                     result = {'call_type': 'forced_to_stop'}
                     break
 
-                if not os.path.exists(src):
+                # lexists, not exists: a broken symlink is still an item to paste (it is
+                # copied as the link it is), and only a path that is really gone is missing
+                if not os.path.lexists(src):
+                    items_missing.append(src)
                     continue
                 filename = extract_filename_from_path(src)
 
@@ -499,6 +518,7 @@ class PasteItemsThread(QThread):
             result.update({'items_skipped': items_skipped,
                            'items_not_pasted': items_not_pasted,
                            'items_pasted': items_pasted,
+                           'items_missing': items_missing,
                            'sources_not_removed': sources_not_removed})
             self.results_queue.put(result)
 

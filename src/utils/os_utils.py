@@ -955,9 +955,14 @@ def get_clipboard_copied_files_paths():
     clipboard = QApplication.clipboard()
     copied_file_paths = []
     if clipboard.mimeData().hasUrls():
-        urls = [x for x in clipboard.mimeData().urls()]
-        copied_file_paths = [url.toString().replace('file://', '').replace('%20', '')
-                             for url in urls]
+        # toLocalFile(), not toString() with the 'file://' prefix cut off: toString() escapes
+        # the characters a URL cannot carry literally, so a file named "a | b.png" came back as
+        # "a %7C b.png" (and "#" as "%23"). That path does not exist, and the paste then quietly
+        # copied nothing. toLocalFile() hands back the real path, unescaped.
+        # Anything that is not a local file (an http:// link, say) yields '' and is dropped.
+        copied_file_paths = [path for path in
+                             (url.toLocalFile() for url in clipboard.mimeData().urls())
+                             if path != '']
     return copied_file_paths
 
 
