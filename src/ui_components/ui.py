@@ -445,7 +445,12 @@ class ui(QtWidgets.QMainWindow):
         self.tree_area = QVBoxLayout(self.trees_subsplitter)
         self.tree = TreeFileExplorer(model=self.folders_tree_model,
                                      parent=self.trees_subsplitter, encompassing_ui=self)
-        self.tree.expandAll()
+        # A new window starts with the top row ('/') open and every folder inside it shut, so
+        # the tree is a short list to scan rather than the whole expanded hierarchy.
+        # expandToDepth(0) opens only the top level; expandAll() opened whatever the model had
+        # loaded by then, which made the starting state depend on timing. Expansion is per view,
+        # so this does not touch the folder tree of any other window (they share one model).
+        self.tree.expandToDepth(0)
         self.tree_area.addWidget(self.tree)
 
         self.left_column_layout.addWidget(self.trees_subsplitter)

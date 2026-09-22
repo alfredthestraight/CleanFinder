@@ -384,6 +384,25 @@ class FileExplorerTable(QTableView):
         self._kept_selection_timer = single_run_qtimer(KEPT_SELECTION_RETRY_MS,
                                                        self._attempt_kept_selection)
 
+    def select_only_this_item(self, item_name: str):
+        """Leave <item_name> as the only selected row, and keep it that way through the directory
+        refreshes the change sets off.
+
+        A rename (or a just-created item) makes the watcher re-read the directory a moment later,
+        which resets the model, wipes the selection and re-selects prev_selected_index - the row
+        selected before the current one. A one-shot "select it in 300ms" timer loses that race
+        whenever the refresh is the slower of the two, which is why the name is recorded here
+        instead: _refresh_source_data re-applies recorded names and returns before the
+        prev_selected_index restore, so any refresh, early or late, ends with this item selected.
+        """
+        self.delayed_select_rows_where_items_texts_are([item_name], keep_after_refresh=True)
+        # Immediate, so the row is selected now rather than after the delay. It clears the
+        # previous selection first, and its _reapplying_selection guard stops
+        # on_selectionChanged from discarding the record set just above.
+        self._reapply_kept_selection()
+        # Nothing stale left for a refresh to restore
+        self.prev_selected_index = None
+
     def delayed_select_rows_where_items_texts_are(self, new_items_names, delay=300,
                                                   clear_first=False,
                                                   keep_after_refresh=False):
@@ -737,18 +756,18 @@ class FileExplorerTable(QTableView):
         self._pending_created_item_name = None
         if old_text == '___User_clicked_esc___' and new_text == '___User_clicked_esc___':
             if select_after and pending_created is not None:
-                self.delayed_select_rows_where_items_texts_are([pending_created], clear_first=True)
+                self.select_only_this_item(pending_created)
             return
         if old_text == new_text:
             if select_after and pending_created is not None:
-                self.delayed_select_rows_where_items_texts_are([new_text], clear_first=True)
+                self.select_only_this_item(new_text)
             return
         existing_names_in_path = self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
         approval = validate_name_change_is_approved(old_text, new_text,
                                                     new_text in existing_names_in_path)
         if approval == 0:
             if select_after and pending_created is not None:
-                self.delayed_select_rows_where_items_texts_are([pending_created], clear_first=True)
+                self.select_only_this_item(pending_created)
             return
         changed_row = \
             np.where(self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX] == old_text)[0][0]
@@ -757,9 +776,10 @@ class FileExplorerTable(QTableView):
         # Update the name in the OS
         rename_file_or_dir(os.path.join(self.path, old_text), new_text)
         self.keep_last_action(UserAction_RenameItem(self.path, old_text, new_text))
-        # Keep the renamed/just-created item selected after the disk change re-sorts the table.
+        # Keep the renamed/just-created item as the only selection, through the refreshes the
+        # disk change sets off.
         if select_after:
-            self.delayed_select_rows_where_items_texts_are([new_text], clear_first=True)
+            self.select_only_this_item(new_text)
 
     def rename_item(self):
         if len(self.selected_items_paths) == 1:
@@ -1402,6 +1422,42 @@ class FileExplorerTable(QTableView):
             return super().sizeHint()
         else:
             return QSize(self.xdim, 681)
+
+    def release_resources(self):
+        """Stop and drop everything this table keeps running. Called from ui.release_resources
+        when the window closes, while the widgets are still valid - see the explanation there."""
+        logger.info("FileExplorerTable.release_resources")
+        watcher = getattr(self, 'watcher', None)
+        if watcher is not None:
+            try:
+                watcher.directoryChanged.disconnect(self._schedule_refresh)
+                watcher.fileChanged.disconnect(self._schedule_refresh)
+            except (RuntimeError, TypeError):
+                # Already disconnected, or the C++ object is gone - either way there is
+                # nothing left to disconnect
+                pass
+            watched = watcher.directories() + watcher.files()
+            if watched:
+                watcher.removePaths(watched)
+            self.watcher = None
+
+        self._refresh_debounce_timer.stop()
+        # single_run_qtimer objects: each holds a bound method of this table, so a pending one
+        # would also fire against a window that is on its way out
+        for timer_attribute in ('click_timer', 'print_stuff_timer', '_kept_selection_timer'):
+            timer = getattr(self, timer_attribute, None)
+            if timer is not None:
+                timer.stop_timer()
+                setattr(self, timer_attribute, None)
+        self._names_to_keep_selected = []
+
+        for prop_box in self.properties_dialog_boxes:
+            prop_box.close()
+        self.properties_dialog_boxes = []
+
+        for zipper in self.zipping_threads:
+            zipper.cancel()
+        self.zipping_threads = []
 
     # Reacts to changes in the file system (e.g., renaming, deleting, etc.)
     def connect_filesystem_watcher(self):
