@@ -65,6 +65,10 @@ MULTISELECT_MODIFIER_MAP = {
 KEPT_SELECTION_RETRY_MS = 150
 KEPT_SELECTION_MAX_RETRIES = 20     # roughly 3 seconds
 
+# How many file names the delete confirmation lists before summarising the rest. Enough to
+# recognise what is about to go, few enough that the box stays a box.
+MAX_ITEMS_NAMED_WHEN_DELETING = 10
+
 
 class FileExplorerTable(QTableView):
     def __init__(self, data_model: QtCore.QAbstractTableModel,
@@ -791,32 +795,51 @@ class FileExplorerTable(QTableView):
     """
     Item deletion
     """
-    def make_sure_user_wants_to_remove_items(self, permanently: bool = False):
-        item_names = self.get_filenames_from_indices(self.selectedIndexes())
+    def make_sure_user_wants_to_remove_items(self, item_names: list[str],
+                                             permanently: bool = False):
+        """Ask about the items named in <item_names> - the ones the caller has already decided
+        to delete. The names are in the question on purpose: without them there was no way to
+        tell from the box which file was about to go."""
         if len(item_names) == 1:
             message_end = 'delete this item?'
         else:
-            message_end = 'delete these items?'
+            message_end = f'delete these {len(item_names)} items?'
         if permanently:
             message_end = 'permanently ' + message_end
-        response = message_box_w_arrow_keys_enabled("Are you sure you want to " + message_end,
-                                                    "Quit?").exec()
-        return response
+        shown = item_names[:MAX_ITEMS_NAMED_WHEN_DELETING]
+        more = len(item_names) - len(shown)
+        message = ("Are you sure you want to " + message_end + "\n\n"
+                   + "\n".join(shown)
+                   + (f"\n... and {more} more" if more > 0 else ""))
+        if permanently:
+            message += "\n\nThis cannot be undone."
+        return message_box_w_arrow_keys_enabled(message, "Delete").exec()
 
 
     def _remove_items(self, permanently: bool = False):
-        reply = self.make_sure_user_wants_to_remove_items(permanently)
+        # Read the selection BEFORE asking, and delete exactly what was read. The question box
+        # runs its own event loop, so a directory refresh landing while it is open used to be
+        # able to move the selection (see _refresh_source_data re-selecting prev_selected_index)
+        # - and what then got deleted was not what the user had highlighted.
+        paths = self._extract_full_paths_from_indices(self.selectedIndexes())
+        if len(paths) == 0:
+            return
+        item_names = [extract_filename_from_path(p) for p in paths]
+
+        reply = self.make_sure_user_wants_to_remove_items(item_names, permanently)
         if reply != QMessageBox.StandardButton.Yes:
+            logger.info("FileExplorerTable._remove_items - the user said no")
             return
         else:
-            logger.info("FileExplorerTable._remove_items - deleting dead threads")
+            logger.info(f"FileExplorerTable._remove_items - "
+                        f"{'permanently deleting' if permanently else 'moving to the Trash'} "
+                        f"{len(paths)} item(s): {paths}")
             for thrd in self.deletion_threads:
                 if not thrd.currently_running:
                     thrd.quit()
                     self.deletion_threads.remove(thrd)
 
             self.cancel_cut_items()
-            paths = self._extract_full_paths_from_indices(self.selectedIndexes())
             self.browsing_history_manager.remove_paths_and_subpaths_from_history(paths)
             deletion_thread = DeletionThread(paths, permanently)
             self.deletion_threads.append(deletion_thread)
