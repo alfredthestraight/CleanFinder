@@ -380,6 +380,8 @@ class ui(QtWidgets.QMainWindow):
         # None only in tests, where TreeFileExplorer then builds one of its own.
         self.folders_tree_model = folders_tree_model
         self._is_closing = False
+        # One search dialog per window, reused by launch_search_window() rather than replaced.
+        self.search_window = None
         self.file_explorer_width = file_explorer_width
         self.left_pane_width = left_pane_width
         self.height = height
@@ -987,8 +989,32 @@ class ui(QtWidgets.QMainWindow):
             return
         self.change_path(target_path, reset_path_history=False)
 
+    def _search_window_is_open(self) -> bool:
+        existing = getattr(self, 'search_window', None)
+        if existing is None:
+            return False
+        try:
+            return existing.is_currently_presented
+        except RuntimeError:
+            # The Python wrapper outlived its C++ widget; there is no window left to reuse.
+            return False
+
     def launch_search_window(self):
+        """Open this window's search dialog, or bring the one it already has back to the front.
+
+        One dialog per window, reused rather than replaced. The dialog is created without a Qt
+        parent, so `self.search_window` is the only reference keeping it alive - assigning a new
+        one over it destroyed the old one on the spot, in the middle of Qt dispatching the
+        keyboard shortcut that got here, and PySide then walked that dialog's signal connections
+        into freed memory. Reusing the dialog means nothing is destroyed here at all.
+        """
         logger.info("ui.launch_search_window")
+        if self._search_window_is_open():
+            self.search_window.set_root_path(self.path)
+            self.search_window.raise_()
+            self.search_window.activateWindow()
+            self.search_window.search_box.setFocus()
+            return
         self.search_window = SearchWindow_threaded(self.path, self)
         self.search_window.show()
 
@@ -1076,6 +1102,15 @@ class ui(QtWidgets.QMainWindow):
         # link to it is dropped
         self.tree.setModel(None)
         self.tree.model = None
+        # The search dialog has no Qt parent, so closing this window leaves it on screen with its
+        # search threads running. close() routes through its reject(), which stops them.
+        if getattr(self, 'search_window', None) is not None:
+            try:
+                self.search_window.close()
+            except RuntimeError:
+                # Its C++ widget is already gone - nothing left to close.
+                pass
+            self.search_window = None
 
     def keyPressEvent(self, e):
         self.file_explorer.keyPressEvent(e)

@@ -18,6 +18,35 @@ SEARCHING_TEXT = 'Searching...'
 SEARCH_FINISHED_TEXT = 'Search finished'
 PARTIAL_RESULTS_TEXT = 'Showing partial results. Scroll to end to continue'
 
+# config.json keys holding the last state of the two toggle buttons next to the search box, as
+# 'Y'/'N'. See ConfigurationsManager for how they are loaded and written back.
+SEARCH_CASE_SENSITIVE_CONFIG_KEY = 'SEARCH_CASE_SENSITIVE'
+SEARCH_CURRENT_DIR_ONLY_CONFIG_KEY = 'SEARCH_CURRENT_DIR_ONLY'
+
+# How long quit_all_threads() waits for a search thread to actually stop before giving up on it.
+# Bounded, because Worker.run() can sit for a long time inside next(files_iter) walking a slow or
+# disconnected volume, and an unbounded wait would freeze the whole window.
+THREAD_SHUTDOWN_WAIT_MS = 2000
+
+# Search threads that did not stop within THREAD_SHUTDOWN_WAIT_MS. Their Worker is still executing
+# run(), so freeing it would leave the running thread and the dialog's still-registered
+# 'chunk_finished' connection pointing at freed memory - which is what crashed the app. Keeping the
+# record here holds both objects alive instead; finished ones are dropped by
+# _discard_finished_abandoned_threads() the next time a search thread is started.
+# The Worker also references its dialog (Worker.encompassing_obj), so a record kept here keeps the
+# dialog alive too - which is what the still-running run() needs, since it reads the dialog's
+# results table.
+_ABANDONED_SEARCH_THREADS = []
+
+
+def _discard_finished_abandoned_threads():
+    """Drop the records of abandoned threads that have since stopped on their own."""
+    # Edited in place rather than rebound, so the list object itself stays the one every other
+    # reference to it is holding.
+    _ABANDONED_SEARCH_THREADS[:] = [record for record in _ABANDONED_SEARCH_THREADS
+                                    if not record['thread'].isFinished()]
+
+
 # The two buttons at the bottom of the window. Both are styled explicitly so they look like each
 # other: an unstyled QPushButton is drawn by the native macOS style, which paints the dialog's
 # default button blue by itself. Read out of the config on every call (like the toggles above the
@@ -127,7 +156,10 @@ class Worker(QObject):
         # A cancelled worker belongs to an abandoned search, so it must not touch the threads
         # of the search that replaced it.
         if not self.cancelled:
-            self.encompassing_obj.quit_all_threads()
+            # Only the signal is emitted from here. Stopping the threads is left to
+            # on_chunk_finished() on the UI thread: quit_all_threads() waits on each thread, and
+            # this method *is* one of those threads, so calling it here would be a thread waiting
+            # on itself.
             self.chunk_finished.emit(self)
 
 
@@ -183,7 +215,11 @@ class SearchWindow_threaded(QDialog):
         super(SearchWindow_threaded, self).__init__()
         self.root_path = root_path
         self.encompassing_ui = encompassing_ui
-        self.threads = {}
+        # One record per search thread started: {'thread': QThread, 'worker': Worker,
+        # 'is_alive': bool}. The record is what keeps the Worker referenced - a Worker cannot be
+        # given a Qt parent, because QObject.moveToThread() refuses to move a parented object -
+        # so it must stay referenced for exactly as long as its thread can still be running it.
+        self.threads = []
         # Search state, initialised here (and not only when a search starts) so that the
         # scrollbar handler and the search-option toggles can be triggered before the
         # first search without raising AttributeError.
@@ -191,8 +227,13 @@ class SearchWindow_threaded(QDialog):
         self.search_finished = True
         self.chunk_ended = True
         self.worker = None
-        # Every worker started for the current search; cleared when the search is abandoned.
+        # Every worker started for the current search; cleared by quit_all_threads(), once the
+        # threads running them have actually stopped.
         self.workers = []
+        # False once the dialog has been closed, so the window that owns it can tell whether it
+        # still has a usable search window or has to build a new one. Same flag (and same purpose)
+        # as PropertiesWindowCalculateSizeInThread.is_currently_presented.
+        self.is_currently_presented = True
         self.initUI()
         self.installEventFilter(self)
         self.search_box.setFocus()
@@ -229,11 +270,14 @@ class SearchWindow_threaded(QDialog):
         self.search_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         enable_home_end_keys(self.search_box)
 
-        # Toggles to the right of the textbox. Both restart the search when clicked.
-        self.case_sensitive_toggle = self.create_search_option_toggle('Aa', 'Case sensitive')
+        # Toggles to the right of the textbox. Both restart the search when clicked, and both
+        # start out at whatever the user last left them at (conf, saved to config.json), so the
+        # choice survives closing the search window and quitting the app.
+        self.case_sensitive_toggle = self.create_search_option_toggle(
+            'Aa', 'Case sensitive', SEARCH_CASE_SENSITIVE_CONFIG_KEY)
         # A horizontal (sideways) arrow for "stay on this level, do not descend into subfolders".
         self.current_dir_only_toggle = self.create_search_option_toggle(
-            '\u2194', 'Only search current directory')
+            '\u2194', 'Only search current directory', SEARCH_CURRENT_DIR_ONLY_CONFIG_KEY)
 
         self.search_row_layout = QHBoxLayout()
         self.search_row_layout.addWidget(self.search_box)
@@ -307,12 +351,16 @@ class SearchWindow_threaded(QDialog):
 
         self.setLayout(self.overall_layout)
 
-    def create_search_option_toggle(self, text: str, tooltip: str) -> QToolButton:
+    def create_search_option_toggle(self, text: str, tooltip: str,
+                                    config_key: str) -> QToolButton:
         toggle = QToolButton()
         toggle.setText(text)
         toggle.setToolTip(tooltip)
         toggle.setCheckable(True)
-        toggle.setChecked(False)
+        # Remembered from the last time the user clicked it (see on_search_option_toggled).
+        # Set before the signal is connected below, so restoring it does not count as a click
+        # and does not start a search in a window that has not been asked for one yet.
+        toggle.setChecked(bool(getattr(conf, config_key)))
         # No focus, otherwise the button would swallow the Enter key that starts a search.
         toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         toggle.setFont(QFont(conf.TEXT_FONT, conf.TEXTBOX_FONT_SIZE))
@@ -338,9 +386,11 @@ class SearchWindow_threaded(QDialog):
             # No search is running, so a leftover "Search finished" next to an empty box would lie.
             self.status_label.setText('')
             return
+        # Stop the previous search before the table is emptied, not after: a worker that is still
+        # running would otherwise append its last rows into the table this just cleared.
         self.cancel_running_workers()
-        self.empty_results_table()
         self.quit_all_threads()
+        self.empty_results_table()
         self.search_finished = False
         self.chunk_ended = False
         # Stateful (for the lifecycle of the search-box) iterator which will be
@@ -358,10 +408,24 @@ class SearchWindow_threaded(QDialog):
         self.start_search()
 
     def on_search_option_toggled(self, _checked: bool):
+        self.save_search_options()
         # A search already ran (or is still running) -> throw its results away and search
         # again from scratch under the new search options.
         if self.files_iter is not None:
             self.start_search()
+
+    def save_search_options(self):
+        """Write both toggles' states into the config, so the next search window starts with them.
+
+        Both are written whichever one was clicked - there are only two, and that avoids having
+        to work out which button sent the signal. conf.set_attr updates the live attribute and
+        the dict that gets written to config.json; the file itself is written when the last
+        window closes (UiWindowManager.on_ui_close), which is how every other option is saved.
+        """
+        conf.set_attr(SEARCH_CASE_SENSITIVE_CONFIG_KEY,
+                      'Y' if self.case_sensitive_toggle.isChecked() else 'N')
+        conf.set_attr(SEARCH_CURRENT_DIR_ONLY_CONFIG_KEY,
+                      'Y' if self.current_dir_only_toggle.isChecked() else 'N')
 
     def keyPressEvent(self, e):
         if (e.key() == QtCore.Qt.Key.Key_Return) or (e.key() == QtCore.Qt.Key.Key_Enter):   # Enter
@@ -380,16 +444,21 @@ class SearchWindow_threaded(QDialog):
         # Tell every worker of the previous search to stop. They check the flag once per item,
         # so they stop appending rows within one item instead of finishing their chunk and
         # mixing the old search's results into the new one.
+        #
+        # This only raises the flag; it deliberately does not drop self.workers. A worker whose
+        # run() is still executing must stay referenced - freeing it leaves the running thread and
+        # the 'chunk_finished' connection registered on this dialog pointing at a destroyed
+        # QObject, which is what segfaulted the app. quit_all_threads() releases them instead,
+        # after waiting for the threads to actually stop.
         for worker in self.workers:
             worker.cancel()
-        self.workers = []
 
     def next_n_items_finder_thread(self, n: int = 100):
-        new_thread_index = len(self.threads)
-        self.threads[new_thread_index] = {'thread': QThread(), 'is_alive': True}
-        new_thread = self.threads[new_thread_index]['thread']
+        _discard_finished_abandoned_threads()
+        new_thread = QThread()
         self.worker = Worker(self, n, self.files_iter)
         self.workers.append(self.worker)
+        self.threads.append({'thread': new_thread, 'worker': self.worker, 'is_alive': True})
         self.worker.moveToThread(new_thread)
         # Connected to a method of the dialog (not a lambda): the dialog lives on the UI thread,
         # so Qt queues the signal onto it instead of running the slot on the worker's thread.
@@ -409,22 +478,92 @@ class SearchWindow_threaded(QDialog):
             return
         self.status_label.setText(SEARCH_FINISHED_TEXT if self.search_finished
                                   else PARTIAL_RESULTS_TEXT)
+        # run() used to stop the threads itself, but it runs on one of the very threads that are
+        # waited on below. Doing it here means it happens on the UI thread instead. The search is
+        # only paused (the user may scroll for another chunk), so self.worker is kept as the
+        # handle scrollbar_reached_bottom() reads - only the finished threads are released.
+        self._stop_and_release_threads()
+
+    def _stop_and_release_threads(self):
+        """Stop every search thread, then release the workers the stopped ones were running.
+
+        Order matters and is the whole point of this method: a worker may only be dereferenced
+        once the thread executing its run() has actually stopped, and its 'chunk_finished'
+        connection to this dialog may only be torn down once the worker itself is about to go.
+        A worker freed while its thread is still inside run() leaves both the thread and that
+        connection pointing at a destroyed QObject, which is what segfaulted the app.
+        """
+        still_running = []
+        for record in self.threads:
+            thread, worker = record['thread'], record['worker']
+            if record['is_alive']:
+                thread.quit()
+                record['is_alive'] = False
+            if thread.wait(THREAD_SHUTDOWN_WAIT_MS):
+                try:
+                    worker.chunk_finished.disconnect(self.on_chunk_finished)
+                except (RuntimeError, TypeError):
+                    # Already disconnected, or the C++ object is gone - either way there is
+                    # nothing left to disconnect
+                    pass
+            else:
+                # Still inside run() (a slow or unresponsive volume). Hand the record over rather
+                # than freeing a worker the thread is still executing.
+                still_running.append(record)
+
+        _ABANDONED_SEARCH_THREADS.extend(still_running)
+        self.threads = []
+        self.workers = []
 
     def quit_all_threads(self):
-        for thread in self.threads.keys():
-            if self.threads[thread]['is_alive']:
-                self.threads[thread]['thread'].quit()
-                self.threads[thread]['is_alive'] = False
+        """Stop the search entirely: release the threads, then let go of the current worker too.
+
+        Used when the search is being replaced or the dialog is closing, as opposed to
+        on_chunk_finished(), which only pauses one and keeps self.worker.
+        """
+        # Raise the cancel flags first. Without it the wait() below would sit for the full
+        # timeout on any worker still walking the tree, freezing the window for that long.
+        # cancel() is idempotent, so calling this straight after cancel_running_workers()
+        # (which every caller but the tests does) costs nothing.
+        self.cancel_running_workers()
+        self._stop_and_release_threads()
+        self.worker = None
 
     def accept(self):
+        self.is_currently_presented = False
         self.cancel_running_workers()
         self.quit_all_threads()
         super(SearchWindow_threaded, self).accept()
 
     def reject(self):
+        self.is_currently_presented = False
         self.cancel_running_workers()
         self.quit_all_threads()
         super(SearchWindow_threaded, self).reject()
+
+    def closeEvent(self, event):
+        # QDialog.closeEvent already routes to reject(), which does the thread teardown; this is
+        # here so the flag is lowered even if that ever stops being true.
+        self.is_currently_presented = False
+        super(SearchWindow_threaded, self).closeEvent(event)
+
+    def set_root_path(self, root_path: str):
+        """Point an already-open search window at a different folder and start it over.
+
+        The window that owns this dialog reuses it instead of building a new one (see
+        ui.launch_search_window), so pressing the search shortcut again has to reset it to the
+        state a freshly-built window would have been in.
+        """
+        self.cancel_running_workers()
+        self.quit_all_threads()
+        self.root_path = root_path
+        self.path_label.setText(root_path)
+        self.empty_results_table()
+        self.status_label.setText('')
+        self.files_iter = None
+        self.search_finished = True
+        self.chunk_ended = True
+        self.search_box.setFocus()
 
     def double_click_on_search_result(self, index):
         item_path = os.path.join(self.root_path, index.data())

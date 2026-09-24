@@ -240,6 +240,11 @@ class ConfigurationsManager:
         self.SHOW_FAVORITES_TITLE = self.config["SHOW_FAVORITES_TITLE"]
         # Dual-pane mode: two file-explorer panes side by side (applies to new windows)
         self.DUAL_PANE_MODE = self.config.get("DUAL_PANE_MODE", "N")
+        # The two toggle buttons next to the search box. Written back by the search window every
+        # time one is clicked, so the choice carries over to the next search window and the next
+        # run of the app.
+        self.SEARCH_CASE_SENSITIVE = self.config.get("SEARCH_CASE_SENSITIVE", "N")
+        self.SEARCH_CURRENT_DIR_ONLY = self.config.get("SEARCH_CURRENT_DIR_ONLY", "N")
 
 
     # Y/N features
@@ -275,6 +280,28 @@ class ConfigurationsManager:
             self._DUAL_PANE_MODE = True
         else:
             self._DUAL_PANE_MODE = False
+
+    @property
+    def SEARCH_CASE_SENSITIVE(self):
+        return self._SEARCH_CASE_SENSITIVE
+
+    @SEARCH_CASE_SENSITIVE.setter
+    def SEARCH_CASE_SENSITIVE(self, value):
+        if value in ['Y', 'y']:
+            self._SEARCH_CASE_SENSITIVE = True
+        else:
+            self._SEARCH_CASE_SENSITIVE = False
+
+    @property
+    def SEARCH_CURRENT_DIR_ONLY(self):
+        return self._SEARCH_CURRENT_DIR_ONLY
+
+    @SEARCH_CURRENT_DIR_ONLY.setter
+    def SEARCH_CURRENT_DIR_ONLY(self, value):
+        if value in ['Y', 'y']:
+            self._SEARCH_CURRENT_DIR_ONLY = True
+        else:
+            self._SEARCH_CURRENT_DIR_ONLY = False
 
     @property
     def SHOW_HIDDEN_ITEMS(self):
@@ -339,6 +366,8 @@ class ConfigurationsManager:
             "FOLDERS_ALWAYS_ABOVE_FILES": "Y",
             "SHOW_HIDDEN_ITEMS": "N",
             "DUAL_PANE_MODE": "N",
+            "SEARCH_CASE_SENSITIVE": "N",
+            "SEARCH_CURRENT_DIR_ONLY": "N",
             "LAST_ICON_SELECTION_DIR": "",
             "scrollbar": {
                 "SCROLLBAR_COLOR": "rgb(200, 207, 210)",
@@ -577,7 +606,8 @@ class ConfigurationsManager:
                 pass
         elif att in ['FILE_EXPLORER_SHOW_ROW_NUMBERS', 'FILE_EXPLORER_ALTERNATING_ROW_COLORS',
                      'FOLDERS_ALWAYS_ABOVE_FILES', 'SHOW_HIDDEN_ITEMS', 'SHOW_FAVORITES_TITLE',
-                     'DUAL_PANE_MODE', 'SHOW_LEFT_PANE']:
+                     'DUAL_PANE_MODE', 'SHOW_LEFT_PANE',
+                     'SEARCH_CASE_SENSITIVE', 'SEARCH_CURRENT_DIR_ONLY']:
             if new_att_value not in ['Y', 'y', 'N', 'n']:
                 pass
         elif att == 'LAST_ICON_SELECTION_DIR':
