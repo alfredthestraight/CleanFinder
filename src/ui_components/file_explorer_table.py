@@ -1182,6 +1182,21 @@ class FileExplorerTable(QTableView):
         self.cancel_cut_items()
         logger.info(f"Copied file path {item_path} to clipboard")
 
+    def copy_items_names_to_clipboard(self):
+        """Put the selected item names on the clipboard as plain text, one per line."""
+        # Row order, not click order: selectedIndexes() lists indexes in the order they were
+        # selected, and a paste should read the way the table reads. One line per name is what
+        # makes a paste into a text editor land on adjacent rows.
+        names = [index.data() for index in
+                 sorted(self.currently_selected_filename_indices, key=lambda i: i.row())]
+        if len(names) == 0:
+            return
+        QApplication.clipboard().setText("\n".join(names))
+        # Putting text on the clipboard replaces the file URLs a pending cut left there, so the
+        # cut state goes too - same reasoning as copy_item_path_to_clipboard
+        self.cancel_cut_items()
+        logger.info(f"Copied item name(s) {names} to clipboard")
+
     def copy_current_path_to_clipboard(self):
         QApplication.clipboard().setText(self.path)
 

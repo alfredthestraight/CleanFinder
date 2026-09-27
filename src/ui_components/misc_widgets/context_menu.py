@@ -145,13 +145,16 @@ class ContextMenuDelegate:
                 {"menu_item_name": "To UPPERCASE",
                  "associated_method": change_items_names_case(self.file_exp_obj, 'upper')}]
 
-    @property
-    def copy_cut_paste_actions_list(self):
+    # A method rather than a property: the "Copy name(s)" label depends on how many items are
+    # selected, the same way the "Manipulate name(s)" submenu title does below.
+    def copy_cut_paste_actions_list(self, num_selected_items: int):
         return [{"menu_item_name": "SEP"},  # Separating line
                 {"menu_item_name": "Copy",
                  "associated_method": self.file_exp_obj.copy_selected_items_to_clipboard},
                 {"menu_item_name": "Copy full path",
                  "associated_method": self.file_exp_obj.copy_item_path_to_clipboard},
+                {"menu_item_name": "Copy name" if num_selected_items == 1 else "Copy names",
+                 "associated_method": self.file_exp_obj.copy_items_names_to_clipboard},
                 {"menu_item_name": "Cut",
                  "associated_method": self.file_exp_obj.cut_item},
                 {"menu_item_name": "Paste",
@@ -229,7 +232,7 @@ class ContextMenuDelegate:
 
 
             """ Functions bulk #5 - cut / copy / paste / zip / properties """
-            actions_list = self.copy_cut_paste_actions_list + \
+            actions_list = self.copy_cut_paste_actions_list(len(items_list)) + \
                            [{"menu_item_name": "Zip",
                              "associated_method": lambda: self.file_exp_obj.zip_items(
                                  self.file_exp_obj.currently_selected_filename_indices)},
