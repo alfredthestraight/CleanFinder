@@ -389,17 +389,21 @@ class FileExplorerTable(QTableView):
                                                        self._attempt_kept_selection)
 
     def select_only_this_item(self, item_name: str):
-        """Leave <item_name> as the only selected row, and keep it that way through the directory
-        refreshes the change sets off.
+        """One-item form of select_only_these_items."""
+        self.select_only_these_items([item_name])
 
-        A rename (or a just-created item) makes the watcher re-read the directory a moment later,
+    def select_only_these_items(self, item_names: list[str]):
+        """Leave <item_names> as the only selected rows, and keep them that way through the
+        directory refreshes the change sets off.
+
+        A rename, a create or a delete makes the watcher re-read the directory a moment later,
         which resets the model, wipes the selection and re-selects prev_selected_index - the row
         selected before the current one. A one-shot "select it in 300ms" timer loses that race
-        whenever the refresh is the slower of the two, which is why the name is recorded here
+        whenever the refresh is the slower of the two, which is why the names are recorded here
         instead: _refresh_source_data re-applies recorded names and returns before the
-        prev_selected_index restore, so any refresh, early or late, ends with this item selected.
+        prev_selected_index restore, so any refresh, early or late, ends with these items selected.
         """
-        self.delayed_select_rows_where_items_texts_are([item_name], keep_after_refresh=True)
+        self.delayed_select_rows_where_items_texts_are(item_names, keep_after_refresh=True)
         # Immediate, so the row is selected now rather than after the delay. It clears the
         # previous selection first, and its _reapplying_selection guard stops
         # on_selectionChanged from discarding the record set just above.
@@ -816,6 +820,22 @@ class FileExplorerTable(QTableView):
         return message_box_w_arrow_keys_enabled(message, "Delete").exec()
 
 
+    def _item_name_to_select_after_removing(self, rows_being_removed: set):
+        """The item to leave selected once <rows_being_removed> are gone: the first one below the
+        bottom-most of them, or the last item in the folder when they reach the bottom. None when
+        the whole folder is being removed.
+
+        Row numbers are display positions: PandasModel sorts its DataFrame in place and re-indexes
+        it, and this view has no proxy model, so a row number means the same thing in both.
+        """
+        names = self.source_data.iloc[:, conf.FILENAME_COLUMN_INDEX].tolist()
+        remaining = [row for row in range(len(names)) if row not in rows_being_removed]
+        if len(remaining) == 0:
+            return None
+        below = [row for row in remaining if row > max(rows_being_removed)]
+        return names[below[0]] if below else names[remaining[-1]]
+
+
     def _remove_items(self, permanently: bool = False):
         # Read the selection BEFORE asking, and delete exactly what was read. The question box
         # runs its own event loop, so a directory refresh landing while it is open used to be
@@ -825,6 +845,9 @@ class FileExplorerTable(QTableView):
         if len(paths) == 0:
             return
         item_names = [extract_filename_from_path(p) for p in paths]
+        # Worked out here, while the rows are still on screen
+        name_to_select_after = self._item_name_to_select_after_removing(
+            {index.row() for index in self.currently_selected_filename_indices})
 
         reply = self.make_sure_user_wants_to_remove_items(item_names, permanently)
         if reply != QMessageBox.StandardButton.Yes:
@@ -844,18 +867,32 @@ class FileExplorerTable(QTableView):
             deletion_thread = DeletionThread(paths, permanently)
             self.deletion_threads.append(deletion_thread)
             # The worker can't put up a dialog itself, so it records a missing Trash and we
-            # report it here, on the UI thread, once it has finished.
+            # report it here, on the UI thread, once it has finished - which is also when the
+            # items are actually gone and the next item can be selected.
             deletion_thread.finished.connect(
-                lambda: self._report_trash_unavailable(deletion_thread, len(paths)))
+                lambda: self._after_deletion(deletion_thread, item_names,
+                                             name_to_select_after))
             deletion_thread.start()
             self.encompassing_uis_manager.remove_paths_and_subpaths_from_browsing_histories(paths)
             self.deletion_timer = \
                 single_run_qtimer(200, lambda: self.encompassing_uis_manager.refresh_all_uis())
 
 
-    def _report_trash_unavailable(self, deletion_thread, num_items: int):
+    def _after_deletion(self, deletion_thread, deleted_item_names: list[str],
+                        name_to_select: str = None):
+        """Runs on the UI thread when the deletion thread has finished."""
         if getattr(deletion_thread, 'trash_unavailable', False):
-            prompt_trash_unavailable(volume_of_path(self.path), num_items)
+            # Nothing was deleted (the volume has no Trash), so the items the user tried to
+            # delete are still there. Keep them selected - the refresh this deletion scheduled
+            # would otherwise clear the selection, leaving the user nothing to retry with
+            # (permanent deletion is the offered way out).
+            prompt_trash_unavailable(volume_of_path(self.path), len(deleted_item_names))
+            self.select_only_these_items(deleted_item_names)
+            return
+        if name_to_select is not None:
+            # Recorded rather than selected once, so the selection survives the directory
+            # refresh that the deletion sets off a moment later
+            self.select_only_this_item(name_to_select)
 
     def remove_items(self):
         self._remove_items(permanently=False)
