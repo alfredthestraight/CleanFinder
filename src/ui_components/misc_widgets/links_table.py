@@ -83,8 +83,16 @@ class LinksTable(DragAndDropFunctionality, QTableView):
         # Keep arrow-key navigation on the column that holds the visible item text
         # (e.g. "Desktop", "Downloads"), so selection never lands on the empty spacer
         # column or any hidden column.
-        index = super().moveCursor(cursorAction, modifiers)
         name_col = self.table.FAVORITES_FILENAME_COLUMN_INDEX
+        # Home / End go to the top / bottom item. QTableView's own Home / End move along the
+        # current row (first / last column), which here would leave the selection where it was.
+        row_count = self.table.rowCount(0)
+        if row_count > 0:
+            if cursorAction == QAbstractItemView.CursorAction.MoveHome:
+                return self.table.index(0, name_col)
+            if cursorAction == QAbstractItemView.CursorAction.MoveEnd:
+                return self.table.index(row_count - 1, name_col)
+        index = super().moveCursor(cursorAction, modifiers)
         if index.isValid() and index.column() != name_col:
             index = index.siblingAtColumn(name_col)
         return index
